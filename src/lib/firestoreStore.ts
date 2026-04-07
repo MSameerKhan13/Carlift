@@ -1,0 +1,221 @@
+import {
+  collection, doc, setDoc, getDocs, onSnapshot,
+  query, orderBy, where, deleteDoc, updateDoc, addDoc,
+  serverTimestamp, getDoc
+} from 'firebase/firestore';
+import { db } from './firebase';
+import type { Booking, Notification, RouteData, PaymentInfo } from './store';
+
+// ─── Bookings ───────────────────────────────────────────────────────────────
+
+export async function saveBookingToFirestore(booking: Booking): Promise<void> {
+  try {
+    await setDoc(doc(db, 'bookings', String(booking.id)), {
+      ...booking,
+      createdAt: booking.createdAt || new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('Firestore save booking error:', err);
+  }
+}
+
+export function subscribeToBookings(callback: (bookings: Booking[]) => void): () => void {
+  const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
+  const unsub = onSnapshot(q, (snap) => {
+    const bookings: Booking[] = snap.docs.map(d => ({ ...d.data() } as Booking));
+    callback(bookings);
+  }, (err) => {
+    console.error('Firestore bookings subscription error:', err);
+  });
+  return unsub;
+}
+
+export function subscribeToUserBookings(userId: string, callback: (bookings: Booking[]) => void): () => void {
+  const q = query(
+    collection(db, 'bookings'),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
+  );
+  const unsub = onSnapshot(q, (snap) => {
+    const bookings: Booking[] = snap.docs.map(d => ({ ...d.data() } as Booking));
+    callback(bookings);
+  }, (err) => {
+    console.error('Firestore user bookings error:', err);
+  });
+  return unsub;
+}
+
+export async function updateBookingInFirestore(id: number, data: Partial<Booking>): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'bookings', String(id)), { ...data, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore update booking error:', err);
+  }
+}
+
+export async function deleteBookingFromFirestore(id: number): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'bookings', String(id)));
+  } catch (err) {
+    console.error('Firestore delete booking error:', err);
+  }
+}
+
+// ─── Admin Notifications ─────────────────────────────────────────────────────
+
+export async function addNotificationToFirestore(message: string, bookingId: number): Promise<void> {
+  try {
+    await addDoc(collection(db, 'adminNotifications'), {
+      message,
+      bookingId,
+      read: false,
+      createdAt: new Date().toISOString(),
+      timestamp: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('Firestore add notification error:', err);
+  }
+}
+
+export function subscribeToNotifications(callback: (notifications: Notification[]) => void): () => void {
+  const q = query(collection(db, 'adminNotifications'), orderBy('createdAt', 'desc'));
+  const unsub = onSnapshot(q, (snap) => {
+    const notifications: Notification[] = snap.docs.map(d => ({
+      id: d.data().id || parseInt(d.id) || Date.now(),
+      ...d.data(),
+      _docId: d.id,
+    } as Notification & { _docId: string }));
+    callback(notifications);
+  }, (err) => {
+    console.error('Firestore notifications subscription error:', err);
+  });
+  return unsub;
+}
+
+export async function markNotificationReadInFirestore(docId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'adminNotifications', docId), { read: true });
+  } catch (err) {
+    console.error('Firestore mark notification read error:', err);
+  }
+}
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+
+export async function saveUserToFirestore(uid: string, data: {
+  name: string; email: string; phone: string; role: 'user' | 'admin';
+}): Promise<void> {
+  try {
+    await setDoc(doc(db, 'users', uid), { ...data, createdAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('Firestore save user error:', err);
+  }
+}
+
+export async function getUserRoleFromFirestore(uid: string): Promise<'user' | 'admin'> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (snap.exists()) return snap.data().role || 'user';
+    return 'user';
+  } catch {
+    return 'user';
+  }
+}
+
+// ─── Car Images ──────────────────────────────────────────────────────────────
+
+export async function saveCarImagesToFirestore(images: Record<string, string>): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'carImages'), { images, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save car images error:', err);
+  }
+}
+
+export async function getCarImagesFromFirestore(): Promise<Record<string, string>> {
+  try {
+    const snap = await getDoc(doc(db, 'settings', 'carImages'));
+    if (snap.exists()) return snap.data().images || {};
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+export async function saveRoutesToFirestore(routes: RouteData[]): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'routes'), { routes, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save routes error:', err);
+  }
+}
+
+export function subscribeToRoutes(callback: (routes: RouteData[]) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'routes'), (snap) => {
+    if (snap.exists()) callback(snap.data().routes || []);
+    else callback([]);
+  }, (err) => {
+    console.error('Firestore routes subscription error:', err);
+  });
+  return unsub;
+}
+
+// ─── Working Days ────────────────────────────────────────────────────────────
+
+export async function saveWorkingDaysToFirestore(days: number): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'fareRate'), { workingDays: days, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (err) {
+    console.error('Firestore save working days error:', err);
+  }
+}
+
+export function subscribeToWorkingDays(callback: (days: number) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'fareRate'), (snap) => {
+    if (snap.exists() && snap.data().workingDays) callback(snap.data().workingDays as number);
+  }, (err) => {
+    console.error('Firestore working days subscription error:', err);
+  });
+  return unsub;
+}
+
+// ─── Fare Per KM ─────────────────────────────────────────────────────────────
+
+export async function saveFarePerKmToFirestore(rate: number): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'fareRate'), { farePerKm: rate, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (err) {
+    console.error('Firestore save fare rate error:', err);
+  }
+}
+
+export function subscribeToFarePerKm(callback: (rate: number) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'fareRate'), (snap) => {
+    if (snap.exists() && snap.data().farePerKm) callback(snap.data().farePerKm as number);
+  }, (err) => {
+    console.error('Firestore fare rate subscription error:', err);
+  });
+  return unsub;
+}
+
+// ─── Payment Info ─────────────────────────────────────────────────────────────
+
+export async function savePaymentInfoToFirestore(info: PaymentInfo): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'paymentInfo'), { ...info, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save payment info error:', err);
+  }
+}
+
+export function subscribeToPaymentInfo(callback: (info: PaymentInfo) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'paymentInfo'), (snap) => {
+    if (snap.exists()) callback(snap.data() as PaymentInfo);
+  }, (err) => {
+    console.error('Firestore payment info subscription error:', err);
+  });
+  return unsub;
+}

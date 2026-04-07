@@ -1,0 +1,25 @@
+{
+  "name": "Admin CarLift – Manage Operations",
+  "short_name": "Admin CarLift",
+  "description": "Car Lift Admin – Manage bookings, routes & notifications",
+  "start_url": "/carlift-admin",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#cc0000",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-admin.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-admin.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business"]
+}
