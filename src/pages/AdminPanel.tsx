@@ -4,7 +4,7 @@ import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
   Image, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
-  ChevronRight, CalendarClock
+  ChevronRight, CalendarClock, Share2
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import {
@@ -142,13 +142,22 @@ function loadLogoBase64(): Promise<string> {
   });
 }
 
-// ── Invoice PDF Generator ────────────────────────────────────────────────────
-async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
+// ── Invoice PDF Builder (returns jsPDF doc) ───────────────────────────────────
+async function buildInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
 
   const logoBase64 = await loadLogoBase64();
+
+  // Booking date formatted in PKT
+  const bookingDatePKT = b.createdAt
+    ? new Date(b.createdAt).toLocaleString('en-PK', {
+        timeZone: 'Asia/Karachi',
+        day: 'numeric', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: true,
+      })
+    : '—';
 
   // Header background
   doc.setFillColor(8, 8, 8);
@@ -226,6 +235,7 @@ async function generateInvoicePDF(b: Booking, carImages: Record<string, string>,
   doc.text("DETAILS", pageW - 20, tableY + 8.5, { align: "right" });
 
   const rows: [string, string][] = [
+    ["Booking Date & Time", bookingDatePKT],
     ["Pickup Location", b.pickup],
     ["Drop-off Location", b.dropoff],
     ["Timing Slot", b.timing],
@@ -303,7 +313,45 @@ async function generateInvoicePDF(b: Booking, carImages: Record<string, string>,
   doc.text(companyInfo.address, pageW / 2, footerY + 20, { align: "center" });
   if (companyInfo.address2) doc.text(companyInfo.address2, pageW / 2, footerY + 25, { align: "center" });
 
-  doc.save(`CarLift_Invoice_${b.id}.pdf`);
+  return doc;
+}
+
+// ── Download Invoice PDF ──────────────────────────────────────────────────────
+function getInvoiceFileName(b: Booking) {
+  const safeName = b.name.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '_').replace(/_+/g, '_').trim();
+  return `CarLift_Invoice_${safeName}_${b.id}.pdf`;
+}
+
+async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
+  const doc = await buildInvoicePDF(b, carImages, companyInfo);
+  doc.save(getInvoiceFileName(b));
+}
+
+// ── Share Invoice PDF via WhatsApp ────────────────────────────────────────────
+async function shareInvoicePDFWhatsApp(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
+  const doc = await buildInvoicePDF(b, carImages, companyInfo);
+  const fileName = getInvoiceFileName(b);
+
+  const waMsg = encodeURIComponent(
+    `Dear ${b.name},\n\nPlease find your Car Lift invoice attached.\n\nBooking #${b.id}\nRoute: ${b.pickup} → ${b.dropoff}\nFare: ${b.fare}\nStatus: ${b.status.toUpperCase()}\n\nThank you for choosing ${companyInfo.name || 'Car Lift'}!`
+  );
+  const waUrl = `https://wa.me/${b.whatsapp}?text=${waMsg}`;
+
+  // Try native Web Share API (works on Android/iOS)
+  try {
+    const blob = doc.output('blob');
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: `Invoice - ${b.name}` });
+      return;
+    }
+  } catch {
+    // Fall through to desktop fallback
+  }
+
+  // Desktop fallback: download PDF then open WhatsApp Web
+  doc.save(fileName);
+  setTimeout(() => window.open(waUrl, '_blank'), 600);
 }
 
 // ── Deadline Badge ────────────────────────────────────────────────────────────
@@ -1287,7 +1335,8 @@ const AdminPanel = () => {
                         <td className="p-3">
                           <div className="flex gap-1.5">
                             <button onClick={() => generateInvoicePDF(b, carImages, companyInfo)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
-                            <button onClick={() => sendWhatsApp(b)} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="WhatsApp"><MessageCircle className="w-4 h-4 text-green-400" /></button>
+                            <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo)} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice PDF via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                            <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
                             <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
                           </div>
                         </td>
