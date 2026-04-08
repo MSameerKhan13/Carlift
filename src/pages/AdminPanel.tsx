@@ -6,8 +6,35 @@ import {
   Image, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
   ChevronRight, CalendarClock
 } from "lucide-react";
+import { jsPDF } from "jspdf";
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  onAuthStateChanged, signOut, updateProfile, type User as FBUser
+} from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import carLiftLogo from "@/assets/carlift-logo-new.png";
+import {
+  getBookings, saveBookings, getPickupLocations, getDropoffMapping,
+  savePickupLocations, saveDropoffMapping, CARS_LIST, ROUTES_DATA, type Booking, type RouteData, type PaymentInfo,
+  getDaysUntilDeadline, getCarImages, saveCarImages, parseFareAmount,
+  getFarePerKmLocal, saveFarePerKmLocal,
+  getWorkingDaysLocal, saveWorkingDaysLocal,
+  type CompanyInfo, getCompanyInfoLocal, saveCompanyInfoLocal
+} from "@/lib/store";
+import {
+  subscribeToBookings, updateBookingInFirestore, deleteBookingFromFirestore,
+  getCarImagesFromFirestore, saveCarImagesToFirestore, uploadCarImageToStorage, deleteCarImageFromStorage,
+  saveRoutesToFirestore, subscribeToRoutes, savePaymentInfoToFirestore, subscribeToPaymentInfo,
+  saveFarePerKmToFirestore, subscribeToFarePerKm,
+  saveWorkingDaysToFirestore, subscribeToWorkingDays,
+  subscribeToNotifications, markNotificationReadInFirestore,
+  saveLocationsToFirestore, subscribeToLocations,
+  saveCarsListToFirestore, subscribeToCarsListFromFirestore,
+  saveCompanyInfoToFirestore, subscribeToCompanyInfo,
+  isAdminInFirestore, saveUserToFirestore
+} from "@/lib/firestoreStore";
 
-// Format date/time in Pakistan Standard Time (Karachi)
+// Format date/time in Pakistan Standard Time (Karachi, UTC+5)
 function formatPKT(isoString: string): string {
   if (!isoString) return '';
   try {
@@ -24,33 +51,6 @@ function formatPKT(isoString: string): string {
     return isoString;
   }
 }
-import { jsPDF } from "jspdf";
-import {
-  signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  onAuthStateChanged, signOut, updateProfile, type User as FBUser
-} from "firebase/auth";
-import { auth } from "@/lib/firebase";
-import carLiftLogo from "@/assets/carlift-logo-new.png";
-import {
-  getBookings, saveBookings, getPickupLocations, getDropoffMapping,
-  savePickupLocations, saveDropoffMapping, CARS_LIST, ROUTES_DATA, type Booking, type RouteData, type PaymentInfo,
-  getDaysUntilDeadline, getCarImages, saveCarImages, parseFareAmount,
-  DEFAULT_FARE_PER_KM, getFarePerKmLocal, saveFarePerKmLocal,
-  DEFAULT_WORKING_DAYS, getWorkingDaysLocal, saveWorkingDaysLocal,
-  type CompanyInfo, getCompanyInfoLocal, saveCompanyInfoLocal, DEFAULT_COMPANY_INFO
-} from "@/lib/store";
-import {
-  subscribeToBookings, updateBookingInFirestore, deleteBookingFromFirestore,
-  getCarImagesFromFirestore, saveCarImagesToFirestore, uploadCarImageToStorage, deleteCarImageFromStorage,
-  saveRoutesToFirestore, subscribeToRoutes, savePaymentInfoToFirestore, subscribeToPaymentInfo,
-  saveFarePerKmToFirestore, subscribeToFarePerKm,
-  saveWorkingDaysToFirestore, subscribeToWorkingDays,
-  subscribeToNotifications, markNotificationReadInFirestore,
-  saveLocationsToFirestore, subscribeToLocations,
-  saveCarsListToFirestore, subscribeToCarsListFromFirestore,
-  saveCompanyInfoToFirestore, subscribeToCompanyInfo,
-  isAdminInFirestore, saveUserToFirestore
-} from "@/lib/firestoreStore";
 
 type AdminTab = 'bookings' | 'routes' | 'settings';
 type NotifDoc = import('@/lib/store').Notification & { _docId?: string };

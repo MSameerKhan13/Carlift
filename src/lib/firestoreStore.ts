@@ -1,5 +1,5 @@
 import {
-  collection, doc, setDoc, getDocs, onSnapshot,
+  collection, doc, setDoc, onSnapshot,
   query, orderBy, where, deleteDoc, updateDoc, addDoc,
   serverTimestamp, getDoc
 } from 'firebase/firestore';
@@ -308,5 +308,3 @@ export function subscribeToPaymentInfo(callback: (info: PaymentInfo) => void): (
   return unsub;
 }
 
-// Kept for backward compat
-export { getDocs };

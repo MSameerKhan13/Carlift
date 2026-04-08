@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   MapPin, Clock, Star, CalendarDays, CreditCard, User, Phone,
   ChevronLeft, ChevronRight, CheckCircle2, X, Navigation, Copy, Check, Car,
@@ -8,8 +8,8 @@ import {
   getPickupLocations, getDropoffMapping, savePickupLocations, saveDropoffMapping,
   ROUTES_DATA, calculateFare, getBookings, saveBookings,
   addNotification, type Booking, type RouteData, type PaymentInfo,
-  getDistanceFromOSRM, getFarePerKmLocal, DEFAULT_FARE_PER_KM,
-  getWorkingDaysLocal, DEFAULT_WORKING_DAYS,
+  getDistanceFromOSRM, getFarePerKmLocal,
+  getWorkingDaysLocal,
   type WeekendOption, weekendExtraDays
 } from "@/lib/store";
 import {
