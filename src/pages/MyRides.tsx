@@ -1,10 +1,28 @@
 import { useState, useEffect } from "react";
-import { Car, MapPin, Clock, User, Phone, CreditCard, CalendarDays, Star, ChevronRight, LogIn } from "lucide-react";
+import { Car, MapPin, Clock, User, Phone, CreditCard, CalendarDays, Star, ChevronRight, LogIn, CalendarClock } from "lucide-react";
 import { Link } from "react-router-dom";
 import { onAuthStateChanged, type User as FBUser } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToUserBookings } from "@/lib/firestoreStore";
 import { getBookings, type Booking } from "@/lib/store";
+
+// Format date/time in Pakistan Standard Time (Karachi)
+function formatPKT(isoString: string): string {
+  if (!isoString) return '';
+  try {
+    return new Date(isoString).toLocaleString('en-PK', {
+      timeZone: 'Asia/Karachi',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+}
 
 const MyRides = () => {
   const [fbUser, setFbUser] = useState<FBUser | null | undefined>(undefined);
@@ -22,7 +40,6 @@ const MyRides = () => {
   useEffect(() => {
     if (fbUser === undefined) return;
     if (!fbUser) {
-      // Fallback: show from localStorage (no userId filter)
       const local = getBookings();
       setBookings(local);
       setLoading(false);
@@ -79,7 +96,6 @@ const MyRides = () => {
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          {/* Active/Approved */}
           {approvedBookings.length > 0 && (
             <div>
               <h3 className="text-green-400 font-semibold text-sm uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -87,14 +103,11 @@ const MyRides = () => {
                 Active Packages
               </h3>
               <div className="flex flex-col gap-3">
-                {approvedBookings.map(b => (
-                  <BookingCard key={b.id} booking={b} />
-                ))}
+                {approvedBookings.map(b => <BookingCard key={b.id} booking={b} />)}
               </div>
             </div>
           )}
 
-          {/* Pending */}
           {pendingBookings.length > 0 && (
             <div>
               <h3 className="text-orange-400 font-semibold text-sm uppercase tracking-wider mb-3 flex items-center gap-2">
@@ -102,9 +115,7 @@ const MyRides = () => {
                 Pending Approval
               </h3>
               <div className="flex flex-col gap-3">
-                {pendingBookings.map(b => (
-                  <BookingCard key={b.id} booking={b} />
-                ))}
+                {pendingBookings.map(b => <BookingCard key={b.id} booking={b} />)}
               </div>
             </div>
           )}
@@ -134,6 +145,12 @@ const BookingCard = ({ booking: b }: { booking: Booking }) => (
           <span className="flex items-center gap-1.5"><Car className="w-3.5 h-3.5 text-primary/60" />{b.assignedCar}</span>
         )}
       </div>
+      {b.createdAt && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground/70 border-t border-border/40 pt-2.5">
+          <CalendarClock className="w-3 h-3 text-primary/40" />
+          <span>Booked on: <span className="text-muted-foreground font-medium">{formatPKT(b.createdAt)}</span> <span className="text-primary/40">(PKT)</span></span>
+        </div>
+      )}
     </div>
     <div className={`px-5 py-2 rounded-full font-semibold text-sm border flex-shrink-0 ${b.status === 'approved' ? 'bg-green-500/20 border-green-500 text-green-400' : 'bg-orange-500/20 border-orange-500 text-orange-400'}`}>
       {b.status === 'approved' ? '✓ Approved' : '⏳ Pending'}

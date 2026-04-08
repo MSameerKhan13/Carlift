@@ -4,8 +4,26 @@ import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
   Image, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
-  ChevronRight
+  ChevronRight, CalendarClock
 } from "lucide-react";
+
+// Format date/time in Pakistan Standard Time (Karachi)
+function formatPKT(isoString: string): string {
+  if (!isoString) return '';
+  try {
+    return new Date(isoString).toLocaleString('en-PK', {
+      timeZone: 'Asia/Karachi',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return isoString;
+  }
+}
 import { jsPDF } from "jspdf";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -1215,6 +1233,12 @@ const AdminPanel = () => {
                         <td className="p-3">
                           <div className="font-semibold text-sm">{b.name}</div>
                           <div className="text-xs text-muted-foreground">{b.whatsapp}</div>
+                          {b.createdAt && (
+                            <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground/60">
+                              <CalendarClock className="w-2.5 h-2.5 text-primary/40" />
+                              {formatPKT(b.createdAt)}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3">
                           <div className="text-sm">{b.pickup} → {b.dropoff}</div>
