@@ -581,6 +581,14 @@ const AdminPanel = () => {
   const [editingRoute, setEditingRoute] = useState<RouteData | null>(null);
   const [savingRoutes, setSavingRoutes] = useState(false);
 
+  // Add New Routes popup state
+  const [showAddRoutePopup, setShowAddRoutePopup] = useState(false);
+  const [newRoutePickupInput, setNewRoutePickupInput] = useState('');
+  const [newRouteDropoffInput, setNewRouteDropoffInput] = useState('');
+  const [newRouteDropoffList, setNewRouteDropoffList] = useState<string[]>([]);
+  const [savingNewRoute, setSavingNewRoute] = useState(false);
+  const [deletingAllLocations, setDeletingAllLocations] = useState(false);
+
   // Payment info state
   const [paymentInfo, setPaymentInfo] = useState<PaymentInfo>({
     easypaisa: { accName: '', accNumber: '' },
@@ -870,6 +878,10 @@ const AdminPanel = () => {
 
   const executeDelete = async () => {
     if (!deleteTarget) return;
+    if (deleteTarget.type === 'pickup' && deleteTarget.name === '__ALL_LOCATIONS__') {
+      await handleDeleteAllLocations();
+      return;
+    }
     if (deleteTarget.type === 'pickup') {
       const updated = pickups.filter(l => l !== deleteTarget.name);
       const updatedMap = { ...dropMap };
@@ -910,6 +922,50 @@ const AdminPanel = () => {
       setNewDropoff('');
       await saveLocationsToFirestore(pickups, updatedMap);
     }
+  };
+
+  const closeAddRoutePopup = () => {
+    setShowAddRoutePopup(false);
+    setNewRoutePickupInput('');
+    setNewRouteDropoffInput('');
+    setNewRouteDropoffList([]);
+  };
+
+  const addDropoffToNewRoute = () => {
+    const d = newRouteDropoffInput.trim();
+    if (d && !newRouteDropoffList.includes(d)) {
+      setNewRouteDropoffList(prev => [...prev, d]);
+      setNewRouteDropoffInput('');
+    }
+  };
+
+  const handleSaveNewRoute = async () => {
+    const pickup = newRoutePickupInput.trim();
+    if (!pickup || newRouteDropoffList.length === 0) return;
+    setSavingNewRoute(true);
+    const updatedPickups = pickups.includes(pickup) ? pickups : [...pickups, pickup];
+    const existingDrops = dropMap[pickup] || [];
+    const mergedDrops = Array.from(new Set([...existingDrops, ...newRouteDropoffList]));
+    const updatedMap = { ...dropMap, [pickup]: mergedDrops };
+    setPickups(updatedPickups);
+    setDropMap(updatedMap);
+    savePickupLocations(updatedPickups);
+    saveDropoffMapping(updatedMap);
+    await saveLocationsToFirestore(updatedPickups, updatedMap);
+    setSavingNewRoute(false);
+    closeAddRoutePopup();
+  };
+
+  const handleDeleteAllLocations = async () => {
+    setDeletingAllLocations(true);
+    savePickupLocations([]);
+    saveDropoffMapping({});
+    setPickups([]);
+    setDropMap({});
+    setSelectedPickupForDrop('');
+    await saveLocationsToFirestore([], {});
+    setDeletingAllLocations(false);
+    setDeleteTarget(null);
   };
 
   // ── Status Handler (requires car assignment) ──────────────────────────────
@@ -1363,25 +1419,22 @@ const AdminPanel = () => {
               {routeExpanded && (
                 <>
                   <div className="mb-4">
-                    <label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-2 block">Pickup Locations</label>
-                    <div className="flex gap-2">
-                      <input value={newPickup} onChange={e => setNewPickup(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && addPickup()}
-                        placeholder="Add pickup location"
-                        className="flex-1 px-3 py-2.5 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none hover:border-primary/50 transition-colors" />
-                      <button onClick={addPickup} className="bg-primary text-primary-foreground px-3 py-2.5 rounded-lg text-sm font-bold hover:bg-primary/80 hover:scale-105 transition-all"><Plus className="w-4 h-4" /></button>
-                    </div>
+                    <button
+                      onClick={() => setShowAddRoutePopup(true)}
+                      className="w-full bg-primary text-primary-foreground py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center justify-center gap-2 hover:scale-[1.02] shadow-lg shadow-primary/20">
+                      <Plus className="w-4 h-4" /> Add New Routes
+                    </button>
                   </div>
 
+                  <div className="mb-2">
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-2 block">Pickup Locations</label>
+                  </div>
                   <div className="flex flex-col gap-2 mb-6">
                     {pickups.map(p => (
-                      <div key={p} className="bg-primary/10 border border-border rounded-lg px-3 py-2.5 flex items-center justify-between hover:border-primary hover:bg-primary/15 transition-all group">
+                      <div key={p} className="bg-primary/10 border border-border rounded-lg px-3 py-2.5 flex items-center hover:border-primary hover:bg-primary/15 transition-all">
                         <span className="flex items-center gap-2 text-sm font-medium">
                           <MapPin className="w-3.5 h-3.5 text-primary" /> {p}
                         </span>
-                        <button onClick={() => confirmDeletePickup(p)} className="text-destructive/50 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     ))}
                   </div>
@@ -1866,6 +1919,44 @@ const AdminPanel = () => {
               </div>
             </div>
           </div>
+
+            {/* ── Danger Zone ── */}
+            <div className="bg-card border-2 border-destructive/50 rounded-2xl p-5">
+              <h3 className="text-destructive font-display font-bold text-lg mb-2 pb-3 border-b border-destructive/30 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" /> Danger Zone
+              </h3>
+              <p className="text-xs text-muted-foreground mb-5">Deleting locations is permanent and cannot be undone. All associated drop-off mappings will also be removed.</p>
+
+              {pickups.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4 italic">No locations configured</p>
+              ) : (
+                <div className="flex flex-col gap-2 mb-5">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Delete Individual Locations</p>
+                  {pickups.map(p => (
+                    <div key={p} className="bg-destructive/5 border border-destructive/20 rounded-xl px-4 py-3 flex items-center justify-between hover:border-destructive/40 transition-all group">
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        <MapPin className="w-3.5 h-3.5 text-destructive/70" /> {p}
+                        <span className="text-xs text-muted-foreground">({(dropMap[p] || []).length} drop-off{(dropMap[p] || []).length !== 1 ? 's' : ''})</span>
+                      </span>
+                      <button
+                        onClick={() => confirmDeletePickup(p)}
+                        className="bg-destructive/20 hover:bg-destructive/40 px-3 py-1.5 rounded-lg text-xs text-destructive font-semibold transition-all flex items-center gap-1.5 hover:scale-105">
+                        <Trash2 className="w-3 h-3" /> Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => setDeleteTarget({ type: 'pickup', name: '__ALL_LOCATIONS__' })}
+                disabled={pickups.length === 0 || deletingAllLocations}
+                className="w-full bg-destructive/15 hover:bg-destructive/30 border border-destructive/40 text-destructive py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40 hover:scale-[1.01]">
+                {deletingAllLocations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                {deletingAllLocations ? 'Deleting...' : 'Delete All Locations'}
+              </button>
+            </div>
+
           </div>
         )}
       </div>
@@ -1935,12 +2026,77 @@ const AdminPanel = () => {
         )}
       </PopupModal>
 
+      {/* Add New Routes Popup */}
+      <PopupModal open={showAddRoutePopup} onClose={closeAddRoutePopup} title="Add New Routes">
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="text-xs font-semibold text-primary uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5" /> Pickup Location
+            </label>
+            <input
+              value={newRoutePickupInput}
+              onChange={e => setNewRoutePickupInput(e.target.value)}
+              placeholder="e.g. Gulistan-e-Johar"
+              className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none transition-colors"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold text-primary uppercase tracking-wider mb-2 block flex items-center gap-1.5">
+              <ChevronRight className="w-3.5 h-3.5" /> Drop-off Locations
+            </label>
+            <div className="flex gap-2 mb-2">
+              <input
+                value={newRouteDropoffInput}
+                onChange={e => setNewRouteDropoffInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addDropoffToNewRoute()}
+                placeholder="e.g. PECHS"
+                className="flex-1 px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none transition-colors"
+              />
+              <button
+                onClick={addDropoffToNewRoute}
+                className="bg-primary text-primary-foreground px-3 py-2 rounded-xl font-bold hover:bg-primary/80 hover:scale-105 transition-all">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {newRouteDropoffList.length > 0 ? (
+              <div className="flex flex-col gap-1.5 bg-primary/5 border border-primary/20 rounded-xl p-3">
+                <p className="text-[10px] text-primary uppercase font-semibold tracking-wider mb-1">Added Drop-offs</p>
+                {newRouteDropoffList.map(d => (
+                  <div key={d} className="bg-card border border-border rounded-lg px-3 py-2 flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-sm">
+                      <ChevronRight className="w-3 h-3 text-primary" /> {d}
+                    </span>
+                    <button
+                      onClick={() => setNewRouteDropoffList(prev => prev.filter(x => x !== d))}
+                      className="text-destructive/60 hover:text-destructive transition-colors">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-2 italic">Add at least one drop-off location</p>
+            )}
+          </div>
+
+          <button
+            onClick={handleSaveNewRoute}
+            disabled={savingNewRoute || !newRoutePickupInput.trim() || newRouteDropoffList.length === 0}
+            className="w-full bg-primary text-primary-foreground py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50 hover:scale-[1.01] mt-1">
+            {savingNewRoute ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+            {savingNewRoute ? 'Saving Route...' : 'Save Route'}
+          </button>
+        </div>
+      </PopupModal>
+
       {/* Delete Confirmation */}
       <ConfirmDeleteModal
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         onConfirm={executeDelete}
-        itemName={deleteTarget?.name || ''}
+        itemName={deleteTarget?.name === '__ALL_LOCATIONS__' ? 'ALL locations and drop-offs' : (deleteTarget?.name || '')}
       />
     </div>
   );
