@@ -5,17 +5,21 @@ import { onAuthStateChanged, signOut, type User as FirebaseUser } from "firebase
 import { auth } from "@/lib/firebase";
 import carLiftLogo from "@/assets/carlift-logo-new.png";
 
-const SlidingBanner = () => (
-  <div className="sliding-banner-bg overflow-hidden whitespace-nowrap border-b-2 border-primary py-3 relative z-50">
-    <div className="flex w-max">
-      {[0, 1].map((i) => (
-        <div key={i} className="inline-block animate-slide whitespace-nowrap pr-8 font-display font-black text-xl md:text-2xl uppercase tracking-wider text-primary-foreground" style={{ textShadow: '2px 2px 0 hsl(0 30% 10%)' }}>
-          MONTHLY PACKAGES ONLY &nbsp;&nbsp;|&nbsp;&nbsp; 25K TO 50K + TAX &nbsp;&nbsp;|&nbsp;&nbsp; PREMIUM CAR LIFT
-        </div>
-      ))}
+const SlidingBanner = () => {
+  const location = useLocation();
+  if (location.pathname === '/carlift-admin') return null;
+  return (
+    <div className="sliding-banner-bg overflow-hidden whitespace-nowrap border-b-2 border-primary py-3 relative z-50">
+      <div className="flex w-max">
+        {[0, 1].map((i) => (
+          <div key={i} className="inline-block animate-slide whitespace-nowrap pr-8 font-display font-black text-xl md:text-2xl uppercase tracking-wider text-primary-foreground" style={{ textShadow: '2px 2px 0 hsl(0 30% 10%)' }}>
+            MONTHLY PACKAGES ONLY &nbsp;&nbsp;|&nbsp;&nbsp; 25K TO 50K + TAX &nbsp;&nbsp;|&nbsp;&nbsp; PREMIUM CAR LIFT
+          </div>
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const Navbar = () => {
   const location = useLocation();

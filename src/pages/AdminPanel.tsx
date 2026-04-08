@@ -552,6 +552,9 @@ const AdminPanel = () => {
   const [companyInfoInput, setCompanyInfoInput] = useState<CompanyInfo>(getCompanyInfoLocal());
   const [savingCompanyInfo, setSavingCompanyInfo] = useState(false);
 
+  // Force re-check key — used after registration when Firestore write completes
+  const [forceRecheckKey, setForceRecheckKey] = useState(0);
+
   // Auth state listener — role-based check via Firestore
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -569,6 +572,17 @@ const AdminPanel = () => {
     });
     return () => unsub();
   }, []);
+
+  // Manual re-check triggered after successful admin registration (race condition fix)
+  useEffect(() => {
+    if (forceRecheckKey === 0) return;
+    const user = auth.currentUser;
+    if (!user) { setAuthChecked(true); return; }
+    isAdminInFirestore(user.uid).then(isAdmin => {
+      if (isAdmin) setAdminUser(user);
+      setAuthChecked(true);
+    });
+  }, [forceRecheckKey]);
 
   // Admin PWA manifest
   useEffect(() => {
@@ -1022,7 +1036,7 @@ const AdminPanel = () => {
   }
 
   if (!adminUser) {
-    return <AdminLoginScreen onLogin={() => {}} />;
+    return <AdminLoginScreen onLogin={() => setForceRecheckKey(k => k + 1)} />;
   }
 
   const handleAdminLogout = async () => {
