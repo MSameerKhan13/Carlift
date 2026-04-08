@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
-  Image, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
+  ImageIcon, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
   ChevronRight, CalendarClock, Share2
 } from "lucide-react";
 import { jsPDF } from "jspdf";
@@ -1771,7 +1771,7 @@ const AdminPanel = () => {
                         <label htmlFor={`car-img-${car.replace(/\s/g, '-')}`}
                           className="cursor-pointer bg-primary/20 hover:bg-primary/30 p-1.5 rounded-lg transition-all hover:scale-110 flex items-center"
                           title="Upload photo">
-                          {uploadingCar === car ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <Image className="w-3.5 h-3.5 text-primary" />}
+                          {uploadingCar === car ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <ImageIcon className="w-3.5 h-3.5 text-primary" />}
                         </label>
                         <input id={`car-img-${car.replace(/\s/g, '-')}`} type="file" accept="image/*" capture="environment"
                           className="hidden"
@@ -1910,7 +1910,7 @@ const AdminPanel = () => {
               Assign car for <span className="text-foreground font-semibold">{activeBookingForCar.name}</span>
             </p>
             <p className="text-xs text-primary/70 mb-3 flex items-center gap-1">
-              <Image className="w-3 h-3" /> Tap the car photo to view full image
+              <ImageIcon className="w-3 h-3" /> Tap the car photo to view full image
             </p>
             {carsList.map(c => (
               <PopupOption
