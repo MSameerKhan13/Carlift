@@ -57,6 +57,24 @@ export interface PaymentInfo {
   bankTransfer: PaymentMethodInfo;
 }
 
+export interface CompanyInfo {
+  name: string;
+  tagline: string;
+  phone: string;
+  email: string;
+  address: string;
+  address2: string;
+}
+
+export const DEFAULT_COMPANY_INFO: CompanyInfo = {
+  name: 'Car Lift',
+  tagline: 'Premium Monthly Car Service',
+  phone: '03089926777',
+  email: '777carcare@gmail.com',
+  address: 'Plot 1/2, 9/7B North Nazimabad Block R, Karachi',
+  address2: 'Workshop: Gulistan-e-Johar, near Kamran Chowrangi',
+};
+
 export const CARS_LIST = [
   "Suzuki Alto 2019 Silver BSB 179",
   "Suzuki Alto 2020 White BVG 830",
@@ -271,7 +289,6 @@ export function parseFareAmount(fare: string): number {
   return 0;
 }
 
-// localStorage helpers
 export function getBookings(): Booking[] {
   return JSON.parse(localStorage.getItem('carLiftBookings') || '[]');
 }
@@ -318,7 +335,6 @@ export function saveDropoffMapping(mapping: Record<string, string[]>) {
   localStorage.setItem('carlift_dropmap', JSON.stringify(mapping));
 }
 
-// Car images
 export function getCarImages(): Record<string, string> {
   return JSON.parse(localStorage.getItem('carlift_car_images') || '{}');
 }
@@ -327,7 +343,16 @@ export function saveCarImages(images: Record<string, string>) {
   localStorage.setItem('carlift_car_images', JSON.stringify(images));
 }
 
-// Notification helpers
+export function getCompanyInfoLocal(): CompanyInfo {
+  const stored = localStorage.getItem('carlift_company_info');
+  if (stored) return JSON.parse(stored);
+  return { ...DEFAULT_COMPANY_INFO };
+}
+
+export function saveCompanyInfoLocal(info: CompanyInfo) {
+  localStorage.setItem('carlift_company_info', JSON.stringify(info));
+}
+
 export function getNotifications(): Notification[] {
   return JSON.parse(localStorage.getItem('carLiftNotifications') || '[]');
 }
@@ -360,7 +385,6 @@ export function markAllNotificationsRead() {
   saveNotifications(updated);
 }
 
-// Deadline helper - calculates days until start date
 export function getDaysUntilDeadline(startDate: string): number | null {
   try {
     const parsed = new Date(startDate);

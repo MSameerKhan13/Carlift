@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, browserSessionPersistence, setPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCqUHzo4ceBolB0mK3A5nhbX8-7stSay5I",
@@ -15,10 +16,10 @@ const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-export const ADMIN_EMAILS = ['admin@carlift.pk', 'carliftadmin@gmail.com'];
+export const ADMIN_EMAILS: string[] = [];
 
-// Auto-logout when browser/tab is closed (session-based persistence)
 setPersistence(auth, browserSessionPersistence).catch(() => {});
 
 export default app;

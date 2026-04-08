@@ -3,33 +3,41 @@ import { useNavigate } from "react-router-dom";
 import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
-  Image, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff
+  Image, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
+  ChevronRight
 } from "lucide-react";
 import { jsPDF } from "jspdf";
-import { signInWithEmailAndPassword, onAuthStateChanged, signOut, type User as FBUser } from "firebase/auth";
-import { auth, ADMIN_EMAILS } from "@/lib/firebase";
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  onAuthStateChanged, signOut, updateProfile, type User as FBUser
+} from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import carLiftLogo from "@/assets/carlift-logo-new.png";
 import {
   getBookings, saveBookings, getPickupLocations, getDropoffMapping,
   savePickupLocations, saveDropoffMapping, CARS_LIST, ROUTES_DATA, type Booking, type RouteData, type PaymentInfo,
   getDaysUntilDeadline, getCarImages, saveCarImages, parseFareAmount,
   DEFAULT_FARE_PER_KM, getFarePerKmLocal, saveFarePerKmLocal,
-  DEFAULT_WORKING_DAYS, getWorkingDaysLocal, saveWorkingDaysLocal
+  DEFAULT_WORKING_DAYS, getWorkingDaysLocal, saveWorkingDaysLocal,
+  type CompanyInfo, getCompanyInfoLocal, saveCompanyInfoLocal, DEFAULT_COMPANY_INFO
 } from "@/lib/store";
 import {
   subscribeToBookings, updateBookingInFirestore, deleteBookingFromFirestore,
-  getCarImagesFromFirestore, saveCarImagesToFirestore,
+  getCarImagesFromFirestore, saveCarImagesToFirestore, uploadCarImageToStorage, deleteCarImageFromStorage,
   saveRoutesToFirestore, subscribeToRoutes, savePaymentInfoToFirestore, subscribeToPaymentInfo,
   saveFarePerKmToFirestore, subscribeToFarePerKm,
   saveWorkingDaysToFirestore, subscribeToWorkingDays,
-  subscribeToNotifications, markNotificationReadInFirestore
+  subscribeToNotifications, markNotificationReadInFirestore,
+  saveLocationsToFirestore, subscribeToLocations,
+  saveCarsListToFirestore, subscribeToCarsListFromFirestore,
+  saveCompanyInfoToFirestore, subscribeToCompanyInfo,
+  isAdminInFirestore, saveUserToFirestore
 } from "@/lib/firestoreStore";
 
-// Admin tabs
 type AdminTab = 'bookings' | 'routes' | 'settings';
 type NotifDoc = import('@/lib/store').Notification & { _docId?: string };
 
-// Popup Modal component
+// ── Popup Modal ──────────────────────────────────────────────────────────────
 const PopupModal = ({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) => {
   if (!open) return null;
   return (
@@ -45,12 +53,22 @@ const PopupModal = ({ open, onClose, title, children }: { open: boolean; onClose
   );
 };
 
-const PopupOption = ({ label, active, onClick, icon }: { label: string; active?: boolean; onClick: () => void; icon?: React.ReactNode }) => (
-  <button onClick={onClick} className={`w-full p-3 my-1.5 border rounded-lg text-left text-sm font-medium transition-all flex items-center gap-3 hover:scale-[1.02] ${active ? 'bg-primary/30 border-primary shadow-[0_0_10px_hsla(0,70%,45%,0.3)]' : 'bg-primary/10 border-border hover:bg-primary/20 hover:border-primary'}`}>
-    {icon}
-    <span className="flex-1">{label}</span>
-    {active && <CheckCircle className="w-4 h-4 text-primary" />}
-  </button>
+const PopupOption = ({ label, active, onClick, icon, onImageClick }: { label: string; active?: boolean; onClick: () => void; icon?: React.ReactNode; onImageClick?: (e: React.MouseEvent) => void }) => (
+  <div className={`flex items-center gap-3 w-full my-1.5 border rounded-lg transition-all hover:scale-[1.01] ${active ? 'bg-primary/30 border-primary shadow-[0_0_10px_hsla(0,70%,45%,0.3)]' : 'bg-primary/10 border-border hover:bg-primary/20 hover:border-primary'}`}>
+    {icon && (
+      <button
+        onClick={onImageClick || (() => {})}
+        className={`flex-shrink-0 pl-3 py-3 ${onImageClick ? 'cursor-zoom-in' : 'cursor-default'}`}
+        title={onImageClick ? "View full image" : undefined}
+      >
+        {icon}
+      </button>
+    )}
+    <button onClick={onClick} className="flex-1 p-3 text-left text-sm font-medium flex items-center gap-2">
+      <span className="flex-1">{label}</span>
+      {active && <CheckCircle className="w-4 h-4 text-primary" />}
+    </button>
+  </div>
 );
 
 const ConfirmDeleteModal = ({ open, onClose, onConfirm, itemName }: { open: boolean; onClose: () => void; onConfirm: () => void; itemName: string }) => (
@@ -67,6 +85,28 @@ const ConfirmDeleteModal = ({ open, onClose, onConfirm, itemName }: { open: bool
   </PopupModal>
 );
 
+// ── Full Image Popup ─────────────────────────────────────────────────────────
+const FullImagePopup = ({ url, carName, onClose }: { url: string; carName: string; onClose: () => void }) => (
+  <div className="fixed inset-0 bg-black/95 z-[9000] flex flex-col items-center justify-center p-4" onClick={onClose}>
+    <div className="relative max-w-2xl w-full" onClick={e => e.stopPropagation()}>
+      <div className="flex justify-between items-center mb-3">
+        <p className="text-white font-semibold text-sm truncate flex-1 mr-3">{carName}</p>
+        <button onClick={onClose} className="bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex-shrink-0">
+          <X className="w-5 h-5 text-white" />
+        </button>
+      </div>
+      <img
+        src={url}
+        alt={carName}
+        className="w-full max-h-[75vh] object-contain rounded-xl border border-white/20"
+        onError={e => { (e.target as HTMLImageElement).alt = 'Image not available'; }}
+      />
+      <p className="text-center text-white/50 text-xs mt-3">Tap outside to close</p>
+    </div>
+  </div>
+);
+
+// ── PDF Logo Loader ──────────────────────────────────────────────────────────
 function loadLogoBase64(): Promise<string> {
   return new Promise((resolve) => {
     const img = new window.Image();
@@ -84,39 +124,40 @@ function loadLogoBase64(): Promise<string> {
   });
 }
 
-async function generateInvoicePDF(b: Booking) {
+// ── Invoice PDF Generator ────────────────────────────────────────────────────
+async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
 
   const logoBase64 = await loadLogoBase64();
 
-  // ── Header background
+  // Header background
   doc.setFillColor(8, 8, 8);
   doc.rect(0, 0, pageW, 52, 'F');
   doc.setFillColor(200, 0, 0);
   doc.rect(0, 52, pageW, 2.5, 'F');
 
-  // ── Logo (left side of header)
+  // Logo
   if (logoBase64) {
-    try { doc.addImage(logoBase64, 'PNG', 12, 6, 44, 38); } catch { /* skip if fails */ }
+    try { doc.addImage(logoBase64, 'PNG', 12, 6, 44, 38); } catch { /* skip */ }
   }
 
-  // ── Company name (right of logo)
+  // Company info (dynamic)
   doc.setTextColor(220, 220, 220);
   doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text("Premium Monthly Car Service", 62, 16);
+  doc.text(companyInfo.tagline || 'Premium Monthly Car Service', 62, 16);
   doc.setTextColor(200, 0, 0);
   doc.setFontSize(7.5);
-  doc.text("Call: 03089926777", 62, 23);
-  doc.text("Email: 777carcare@gmail.com", 62, 29);
+  doc.text(`Call: ${companyInfo.phone}`, 62, 23);
+  doc.text(`Email: ${companyInfo.email}`, 62, 29);
   doc.setTextColor(160, 160, 160);
   doc.setFontSize(6.5);
-  doc.text("Plot 1/2, 9/7B North Nazimabad Block R, Karachi", 62, 35);
-  doc.text("Workshop: Gulistan-e-Johar, near Kamran Chowrangi", 62, 40);
+  doc.text(companyInfo.address, 62, 35);
+  if (companyInfo.address2) doc.text(companyInfo.address2, 62, 40);
 
-  // ── INVOICE title (right side)
+  // INVOICE title
   doc.setTextColor(200, 0, 0);
   doc.setFontSize(24);
   doc.setFont("helvetica", "bold");
@@ -127,7 +168,7 @@ async function generateInvoicePDF(b: Booking) {
   doc.text(`#INV-${b.id}`, pageW - 14, 30, { align: "right" });
   doc.text(new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }), pageW - 14, 37, { align: "right" });
 
-  // ── Billed To
+  // Billed To
   const billY = 62;
   doc.setFillColor(16, 16, 16);
   doc.roundedRect(14, billY, (pageW - 28) * 0.55, 36, 3, 3, 'F');
@@ -146,7 +187,7 @@ async function generateInvoicePDF(b: Booking) {
   doc.text(`WhatsApp: ${b.whatsapp}`, 22, billY + 28);
   doc.text(`Start Date: ${b.startDate}`, 22, billY + 34);
 
-  // ── Status badge (right side of billed to row)
+  // Status badge
   const badgeX = pageW - 14 - 52;
   const isApproved = b.status === 'approved';
   doc.setFillColor(isApproved ? 0 : 180, isApproved ? 140 : 80, isApproved ? 0 : 0);
@@ -156,7 +197,7 @@ async function generateInvoicePDF(b: Booking) {
   doc.setFont("helvetica", "bold");
   doc.text(isApproved ? 'APPROVED' : 'PENDING', badgeX + 26, billY + 14, { align: "center" });
 
-  // ── Table
+  // Table
   const tableY = billY + 44;
   doc.setFillColor(200, 0, 0);
   doc.rect(14, tableY, pageW - 28, 12, 'F');
@@ -191,7 +232,24 @@ async function generateInvoicePDF(b: Booking) {
     ry += 12;
   });
 
-  // ── Total fare box
+  // Car image link row (if car assigned and has Storage URL)
+  if (b.assignedCar && carImages[b.assignedCar] && carImages[b.assignedCar].startsWith('http')) {
+    const carImgUrl = carImages[b.assignedCar];
+    doc.setFillColor(30, 10, 10);
+    doc.rect(14, ry, pageW - 28, 12, 'F');
+    doc.setFillColor(200, 0, 0);
+    doc.rect(14, ry, 2, 12, 'F');
+    doc.setTextColor(130, 130, 130);
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    doc.text("Car Image", 20, ry + 8.5);
+    doc.setTextColor(100, 150, 255);
+    doc.setFont("helvetica", "bold");
+    doc.textWithLink("Click to view car image", pageW - 20, ry + 8.5, { url: carImgUrl, align: "right" });
+    ry += 12;
+  }
+
+  // Total fare box
   ry += 6;
   doc.setFillColor(200, 0, 0);
   doc.roundedRect(pageW / 2, ry, pageW / 2 - 14, 20, 3, 3, 'F');
@@ -203,7 +261,7 @@ async function generateInvoicePDF(b: Booking) {
   doc.setFont("helvetica", "bold");
   doc.text(b.fare, pageW - 20, ry + 15, { align: "right" });
 
-  // ── Note
+  // Note
   ry += 28;
   doc.setFillColor(16, 16, 16);
   doc.roundedRect(14, ry, pageW - 28, 14, 2, 2, 'F');
@@ -212,7 +270,7 @@ async function generateInvoicePDF(b: Booking) {
   doc.setFont("helvetica", "italic");
   doc.text("This is a system-generated invoice. Payment should be sent via the selected method before the start date.", 20, ry + 9);
 
-  // ── Footer
+  // Footer
   const footerY = pageH - 28;
   doc.setFillColor(8, 8, 8);
   doc.rect(0, footerY, pageW, 28, 'F');
@@ -221,15 +279,16 @@ async function generateInvoicePDF(b: Booking) {
   doc.setTextColor(90, 90, 90);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
-  doc.text("CONTACT US", pageW / 2, footerY + 9, { align: "center" });
+  doc.text(companyInfo.name.toUpperCase() + " — CONTACT", pageW / 2, footerY + 9, { align: "center" });
   doc.setTextColor(120, 120, 120);
-  doc.text("Call: 03089926777  |  Email: 777carcare@gmail.com", pageW / 2, footerY + 15, { align: "center" });
-  doc.text("Plot 1/2, 9/7B North Nazimabad Block R, Karachi (Old Sabzi Mandi area, near Star Ghanamotor)", pageW / 2, footerY + 20, { align: "center" });
-  doc.text("Workshop: Gulistan-e-Johar, near Kamran Chowrangi", pageW / 2, footerY + 25, { align: "center" });
+  doc.text(`Call: ${companyInfo.phone}  |  Email: ${companyInfo.email}`, pageW / 2, footerY + 15, { align: "center" });
+  doc.text(companyInfo.address, pageW / 2, footerY + 20, { align: "center" });
+  if (companyInfo.address2) doc.text(companyInfo.address2, pageW / 2, footerY + 25, { align: "center" });
 
   doc.save(`CarLift_Invoice_${b.id}.pdf`);
 }
 
+// ── Deadline Badge ────────────────────────────────────────────────────────────
 const DeadlineBadge = ({ startDate }: { startDate: string }) => {
   const days = getDaysUntilDeadline(startDate);
   if (days === null) return <span className="text-xs text-muted-foreground">{startDate}</span>;
@@ -255,22 +314,30 @@ const DeadlineBadge = ({ startDate }: { startDate: string }) => {
   );
 };
 
+// ── Admin Login Screen ────────────────────────────────────────────────────────
 const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
+  const [tab, setTab] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [regName, setRegName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
+  const [showRegPw, setShowRegPw] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError(''); setSuccess('');
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      if (!ADMIN_EMAILS.includes(cred.user.email || '')) {
+      const isAdmin = await isAdminInFirestore(cred.user.uid);
+      if (!isAdmin) {
         await signOut(auth);
-        setError('Access denied. This account is not an admin.');
+        setError('Access denied. This account does not have admin privileges.');
         setLoading(false);
         return;
       }
@@ -281,74 +348,133 @@ const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
     setLoading(false);
   };
 
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    if (!regName || !regEmail || !regPassword) { setError('All fields are required.'); return; }
+    if (regPassword.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    setLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, regEmail.trim(), regPassword);
+      await updateProfile(cred.user, { displayName: regName });
+      await saveUserToFirestore(cred.user.uid, {
+        name: regName, email: regEmail.trim(), phone: '', role: 'admin',
+      });
+      setSuccess('Admin account created successfully! You are now logged in.');
+      setTimeout(() => onLogin(), 1000);
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code || '';
+      const map: Record<string, string> = {
+        'auth/email-already-in-use': 'This email is already registered.',
+        'auth/weak-password': 'Password must be at least 6 characters.',
+        'auth/invalid-email': 'Please enter a valid email address.',
+      };
+      setError(map[code] || 'Registration failed. Please try again.');
+    }
+    setLoading(false);
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="bg-card border-2 border-primary rounded-2xl p-8 shadow-2xl shadow-primary/20">
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-primary/20 border-2 border-primary/50 rounded-2xl mb-4">
               <Crown className="w-8 h-8 text-primary" />
             </div>
             <h1 className="font-display text-2xl font-black text-primary uppercase tracking-wider">Admin Panel</h1>
-            <p className="text-muted-foreground text-sm mt-1">Sign in to manage Car Lift operations</p>
+            <p className="text-muted-foreground text-sm mt-1">Car Lift operations management</p>
           </div>
 
-          <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-primary uppercase tracking-wider">Admin Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="admin@example.com"
-                required
-                autoComplete="email"
-                className="px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors hover:border-primary/70"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-primary uppercase tracking-wider">Password</label>
-              <div className="relative">
-                <input
-                  type={showPw ? "text" : "password"}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  autoComplete="current-password"
-                  className="w-full px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors hover:border-primary/70 pr-12"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              </div>
-            </div>
+          {/* Tab Switcher */}
+          <div className="flex bg-input/60 rounded-xl p-1 mb-6">
+            {(['login', 'register'] as const).map(t => (
+              <button key={t} onClick={() => { setTab(t); setError(''); setSuccess(''); }}
+                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-colors ${tab === t ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground'}`}>
+                {t === 'login' ? 'Sign In' : 'Register Admin'}
+              </button>
+            ))}
+          </div>
 
-            {error && (
-              <div className="bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {error}
-              </div>
-            )}
+          {error && (
+            <div className="bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-3 rounded-xl flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" /> {error}
+            </div>
+          )}
+          {success && (
+            <div className="bg-green-500/15 border border-green-500/40 text-green-400 text-sm px-4 py-3 rounded-xl flex items-center gap-2 mb-4">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" /> {success}
+            </div>
+          )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="bg-primary hover:bg-primary/85 text-primary-foreground py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] disabled:opacity-60 mt-2"
-            >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-          </form>
+          {tab === 'login' ? (
+            <form onSubmit={handleLogin} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-primary uppercase tracking-wider">Admin Email</label>
+                <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@example.com"
+                  required autoComplete="email"
+                  className="px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-primary uppercase tracking-wider">Password</label>
+                <div className="relative">
+                  <input type={showPw ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••" required autoComplete="current-password"
+                    className="w-full px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors pr-12" />
+                  <button type="button" onClick={() => setShowPw(p => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                    {showPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+              <button type="submit" disabled={loading}
+                className="bg-primary hover:bg-primary/85 text-primary-foreground py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] disabled:opacity-60 mt-2">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
+                {loading ? 'Signing in...' : 'Sign In'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegister} className="flex flex-col gap-4">
+              <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 mb-1">
+                <p className="text-xs text-muted-foreground">Create a new admin account with full access to the admin panel.</p>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-primary uppercase tracking-wider">Full Name</label>
+                <input type="text" value={regName} onChange={e => setRegName(e.target.value)} placeholder="Admin Name"
+                  required className="px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-primary uppercase tracking-wider">Email Address</label>
+                <input type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)} placeholder="admin@example.com"
+                  required autoComplete="email"
+                  className="px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-primary uppercase tracking-wider">Password</label>
+                <div className="relative">
+                  <input type={showRegPw ? "text" : "password"} value={regPassword} onChange={e => setRegPassword(e.target.value)}
+                    placeholder="Min. 6 characters" required autoComplete="new-password"
+                    className="w-full px-4 py-3 bg-input border border-primary/40 rounded-xl text-foreground focus:border-primary focus:outline-none transition-colors pr-12" />
+                  <button type="button" onClick={() => setShowRegPw(p => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+                    {showRegPw ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+              <button type="submit" disabled={loading}
+                className="bg-primary hover:bg-primary/85 text-primary-foreground py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] disabled:opacity-60 mt-2">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Crown className="w-5 h-5" />}
+                {loading ? 'Creating account...' : 'Create Admin Account'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
+// ── Main AdminPanel ──────────────────────────────────────────────────────────
 const AdminPanel = () => {
   const navigate = useNavigate();
   const [adminUser, setAdminUser] = useState<FBUser | null>(null);
@@ -364,17 +490,23 @@ const AdminPanel = () => {
 
   const [carPopup, setCarPopup] = useState<number | null>(null);
   const [statusPopup, setStatusPopup] = useState<number | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'pickup' | 'dropoff'; name: string; parent?: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'pickup' | 'dropoff' | 'car'; name: string; parent?: string } | null>(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<NotifDoc[]>([]);
   const [showNewBookingPopup, setShowNewBookingPopup] = useState(false);
   const [newBookingsForPopup, setNewBookingsForPopup] = useState<Booking[]>([]);
   const [routeExpanded, setRouteExpanded] = useState(true);
+  const [approveError, setApproveError] = useState<number | null>(null);
 
   // Car images state
   const [carImages, setCarImages] = useState<Record<string, string>>(getCarImages());
   const [uploadingCar, setUploadingCar] = useState<string | null>(null);
-  const [savingImages, setSavingImages] = useState(false);
+  const [viewCarImage, setViewCarImage] = useState<{ car: string; url: string } | null>(null);
+
+  // Cars list (dynamic from Firestore)
+  const [carsList, setCarsList] = useState<string[]>(CARS_LIST);
+  const [newCarName, setNewCarName] = useState('');
+  const [addingCar, setAddingCar] = useState(false);
 
   // Routes management state
   const [routes, setRoutes] = useState<RouteData[]>(ROUTES_DATA);
@@ -397,11 +529,21 @@ const AdminPanel = () => {
   const [workingDaysInput, setWorkingDaysInput] = useState<string>(String(getWorkingDaysLocal()));
   const [savingWorkingDays, setSavingWorkingDays] = useState(false);
 
-  // Auth state listener
+  // Company info state
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(getCompanyInfoLocal());
+  const [companyInfoInput, setCompanyInfoInput] = useState<CompanyInfo>(getCompanyInfoLocal());
+  const [savingCompanyInfo, setSavingCompanyInfo] = useState(false);
+
+  // Auth state listener — role-based check via Firestore
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user && ADMIN_EMAILS.includes(user.email || '')) {
-        setAdminUser(user);
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const isAdmin = await isAdminInFirestore(user.uid);
+        if (isAdmin) {
+          setAdminUser(user);
+        } else {
+          setAdminUser(null);
+        }
       } else {
         setAdminUser(null);
       }
@@ -410,7 +552,7 @@ const AdminPanel = () => {
     return () => unsub();
   }, []);
 
-  // Switch to admin PWA manifest and icon
+  // Admin PWA manifest
   useEffect(() => {
     const manifest = document.getElementById('pwa-manifest') as HTMLLinkElement | null;
     const prevManifest = manifest?.href || '';
@@ -429,19 +571,52 @@ const AdminPanel = () => {
     };
   }, []);
 
-  // Subscribe to routes from Firestore
+  // Subscribe to routes
   useEffect(() => {
     const unsub = subscribeToRoutes(r => { if (r.length) setRoutes(r); });
     return () => unsub();
   }, []);
 
-  // Subscribe to payment info from Firestore
+  // Subscribe to payment info
   useEffect(() => {
     const unsub = subscribeToPaymentInfo(info => setPaymentInfo(info));
     return () => unsub();
   }, []);
 
-  // Firestore real-time subscription + live new-booking detection (only when authenticated)
+  // Subscribe to locations from Firestore
+  useEffect(() => {
+    const unsub = subscribeToLocations((firestorePickups, firestoreDropMap) => {
+      if (firestorePickups.length > 0) {
+        setPickups(firestorePickups);
+        savePickupLocations(firestorePickups);
+      }
+      if (Object.keys(firestoreDropMap).length > 0) {
+        setDropMap(firestoreDropMap);
+        saveDropoffMapping(firestoreDropMap);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to cars list from Firestore
+  useEffect(() => {
+    const unsub = subscribeToCarsListFromFirestore(cars => {
+      if (cars.length > 0) setCarsList(cars);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to company info from Firestore
+  useEffect(() => {
+    const unsub = subscribeToCompanyInfo(info => {
+      setCompanyInfo(info);
+      setCompanyInfoInput(info);
+      saveCompanyInfoLocal(info);
+    });
+    return () => unsub();
+  }, []);
+
+  // Firestore real-time bookings (only when authenticated)
   const knownBookingIds = React.useRef<Set<number> | null>(null);
   useEffect(() => {
     if (!adminUser) return;
@@ -450,12 +625,9 @@ const AdminPanel = () => {
       unsub = subscribeToBookings((firestoreBookings) => {
         setIsRealtime(true);
         saveBookings(firestoreBookings);
-        // Detect brand-new bookings arriving in real-time (after initial load)
         const currentIds = new Set(firestoreBookings.map(b => b.id));
         if (knownBookingIds.current !== null) {
-          const brandNew = firestoreBookings.filter(
-            b => !knownBookingIds.current!.has(b.id) && b.status === 'pending'
-          );
+          const brandNew = firestoreBookings.filter(b => !knownBookingIds.current!.has(b.id) && b.status === 'pending');
           if (brandNew.length > 0) {
             setNewBookingsForPopup(brandNew);
             setShowNewBookingPopup(true);
@@ -465,16 +637,13 @@ const AdminPanel = () => {
         setBookings(firestoreBookings);
       });
     } catch {
-      // Fallback to polling
-      const interval = setInterval(() => {
-        setBookings(getBookings());
-      }, 2000);
+      const interval = setInterval(() => setBookings(getBookings()), 2000);
       return () => clearInterval(interval);
     }
     return () => { if (unsub) unsub(); };
   }, [adminUser]);
 
-  // Subscribe to Firestore notifications (only when authenticated)
+  // Subscribe to notifications
   useEffect(() => {
     if (!adminUser) return;
     const unsub = subscribeToNotifications(notifs => setNotifications(notifs as NotifDoc[]));
@@ -532,11 +701,9 @@ const AdminPanel = () => {
     return days !== null && days >= 0 && days <= 3;
   }).length;
 
-  // ── Seen Booking Helpers ─────────────────────────────────────────────────────
   const getSeenIds = (): number[] => JSON.parse(localStorage.getItem('carlift_admin_seen_ids') || '[]');
   const saveSeenIds = (ids: number[]) => localStorage.setItem('carlift_admin_seen_ids', JSON.stringify(ids));
 
-  // ── Favicon Badge ────────────────────────────────────────────────────────────
   const updateFaviconBadge = (count: number) => {
     const canvas = document.createElement('canvas');
     canvas.width = 32; canvas.height = 32;
@@ -575,18 +742,13 @@ const AdminPanel = () => {
     };
   };
 
-  // ── Tab title + favicon badge on pending count change ─────────────────────
   useEffect(() => {
     if (!adminUser) return;
-    if (pendingCount > 0) {
-      document.title = `(${pendingCount}) CarLift Admin — Pending`;
-    } else {
-      document.title = 'CarLift Admin Panel';
-    }
+    if (pendingCount > 0) document.title = `(${pendingCount}) CarLift Admin — Pending`;
+    else document.title = 'CarLift Admin Panel';
     updateFaviconBadge(pendingCount);
   }, [pendingCount, adminUser]);
 
-  // ── New booking popup — only once per session on initial load ─────────────
   const initialPopupShown = React.useRef(false);
   useEffect(() => {
     if (!adminUser || bookings.length === 0) return;
@@ -604,19 +766,13 @@ const AdminPanel = () => {
 
   const dismissNewBookingPopup = () => {
     const allPendingIds = bookings.filter(b => b.status === 'pending').map(b => b.id);
-    const existing = getSeenIds();
-    const merged = Array.from(new Set([...existing, ...allPendingIds]));
+    const merged = Array.from(new Set([...getSeenIds(), ...allPendingIds]));
     saveSeenIds(merged);
     setShowNewBookingPopup(false);
   };
 
-  const refresh = () => {
-    setBookings(getBookings());
-    setPickups(getPickupLocations());
-    setDropMap(getDropoffMapping());
-  };
-
-  const addPickup = () => {
+  // ── Location Handlers ─────────────────────────────────────────────────────
+  const addPickup = async () => {
     if (newPickup && !pickups.includes(newPickup)) {
       const updated = [...pickups, newPickup];
       const updatedMap = { ...dropMap, [newPickup]: [] };
@@ -625,13 +781,14 @@ const AdminPanel = () => {
       setPickups(updated);
       setDropMap(updatedMap);
       setNewPickup('');
+      await saveLocationsToFirestore(updated, updatedMap);
     }
   };
 
   const confirmDeletePickup = (p: string) => setDeleteTarget({ type: 'pickup', name: p });
   const confirmDeleteDropoff = (pick: string, drop: string) => setDeleteTarget({ type: 'dropoff', name: drop, parent: pick });
 
-  const executeDelete = () => {
+  const executeDelete = async () => {
     if (!deleteTarget) return;
     if (deleteTarget.type === 'pickup') {
       const updated = pickups.filter(l => l !== deleteTarget.name);
@@ -642,24 +799,47 @@ const AdminPanel = () => {
       setPickups(updated);
       setDropMap(updatedMap);
       if (selectedPickupForDrop === deleteTarget.name) setSelectedPickupForDrop('');
+      await saveLocationsToFirestore(updated, updatedMap);
     } else if (deleteTarget.type === 'dropoff' && deleteTarget.parent) {
       const updatedMap = { ...dropMap, [deleteTarget.parent]: dropMap[deleteTarget.parent].filter(d => d !== deleteTarget.name) };
       saveDropoffMapping(updatedMap);
       setDropMap(updatedMap);
+      await saveLocationsToFirestore(pickups, updatedMap);
+    } else if (deleteTarget.type === 'car') {
+      const updated = carsList.filter(c => c !== deleteTarget.name);
+      setCarsList(updated);
+      await saveCarsListToFirestore(updated);
+      // Also remove car image if exists
+      if (carImages[deleteTarget.name]) {
+        const updatedImgs = { ...carImages };
+        delete updatedImgs[deleteTarget.name];
+        setCarImages(updatedImgs);
+        saveCarImages(updatedImgs);
+        await saveCarImagesToFirestore(updatedImgs);
+        await deleteCarImageFromStorage(deleteTarget.name).catch(() => {});
+      }
     }
     setDeleteTarget(null);
   };
 
-  const addDropoff = () => {
+  const addDropoff = async () => {
     if (selectedPickupForDrop && newDropoff && !dropMap[selectedPickupForDrop]?.includes(newDropoff)) {
       const updatedMap = { ...dropMap, [selectedPickupForDrop]: [...(dropMap[selectedPickupForDrop] || []), newDropoff] };
       saveDropoffMapping(updatedMap);
       setDropMap(updatedMap);
       setNewDropoff('');
+      await saveLocationsToFirestore(pickups, updatedMap);
     }
   };
 
+  // ── Status Handler (requires car assignment) ──────────────────────────────
   const updateStatus = async (id: number, status: 'pending' | 'approved') => {
+    const booking = bookings.find(b => b.id === id);
+    if (status === 'approved' && booking && !booking.assignedCar) {
+      setApproveError(id);
+      return;
+    }
+    setApproveError(null);
     const updated = bookings.map(b => b.id === id ? { ...b, status } : b);
     saveBookings(updated);
     setBookings(updated);
@@ -667,6 +847,7 @@ const AdminPanel = () => {
     await updateBookingInFirestore(id, { status });
   };
 
+  // ── Car Assignment ────────────────────────────────────────────────────────
   const assignCar = async (id: number, car: string) => {
     const updated = bookings.map(b => b.id === id ? { ...b, assignedCar: car } : b);
     saveBookings(updated);
@@ -687,9 +868,7 @@ const AdminPanel = () => {
   };
 
   const handleMarkAllRead = () => {
-    notifications.forEach(n => {
-      if (!n.read && n._docId) markNotificationReadInFirestore(n._docId);
-    });
+    notifications.forEach(n => { if (!n.read && n._docId) markNotificationReadInFirestore(n._docId); });
   };
 
   const handleMarkRead = (id: number) => {
@@ -697,10 +876,9 @@ const AdminPanel = () => {
     if (n?._docId) markNotificationReadInFirestore(n._docId);
   };
 
-  // Car image management — compress + save as base64
+  // ── Car Image Upload (Firebase Storage + Firestore) ───────────────────────
   const compressAndSave = async (carName: string, file: File) => {
     setUploadingCar(carName);
-    setSavingImages(true);
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -710,20 +888,30 @@ const AdminPanel = () => {
           const img = new window.Image();
           img.onerror = reject;
           img.onload = () => {
-            const MAX = 480;
+            const MAX = 800;
             let w = img.width, h = img.height;
             if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
             else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
             const canvas = document.createElement('canvas');
             canvas.width = w; canvas.height = h;
             canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL('image/jpeg', 0.72));
+            resolve(canvas.toDataURL('image/jpeg', 0.82));
           };
           img.src = src;
         };
         reader.readAsDataURL(file);
       });
-      const updated = { ...carImages, [carName]: base64 };
+
+      let imageUrl = base64;
+      // Try Firebase Storage first
+      try {
+        imageUrl = await uploadCarImageToStorage(carName, base64);
+      } catch (storageErr) {
+        console.warn('Firebase Storage upload failed, using base64 fallback:', storageErr);
+        imageUrl = base64;
+      }
+
+      const updated = { ...carImages, [carName]: imageUrl };
       setCarImages(updated);
       saveCarImages(updated);
       await saveCarImagesToFirestore(updated);
@@ -731,7 +919,6 @@ const AdminPanel = () => {
       console.error('Image upload error:', err);
     } finally {
       setUploadingCar(null);
-      setSavingImages(false);
     }
   };
 
@@ -741,9 +928,22 @@ const AdminPanel = () => {
     setCarImages(updated);
     saveCarImages(updated);
     await saveCarImagesToFirestore(updated);
+    await deleteCarImageFromStorage(carName).catch(() => {});
   };
 
-  // Routes management handlers
+  // ── Cars List Handlers ────────────────────────────────────────────────────
+  const handleAddCar = async () => {
+    const trimmed = newCarName.trim();
+    if (!trimmed || carsList.includes(trimmed)) return;
+    setAddingCar(true);
+    const updated = [...carsList, trimmed];
+    setCarsList(updated);
+    await saveCarsListToFirestore(updated);
+    setNewCarName('');
+    setAddingCar(false);
+  };
+
+  // ── Routes Handlers ───────────────────────────────────────────────────────
   const handleAddRoute = async () => {
     if (!newRouteTitle.trim() || !newRouteTiming.trim()) return;
     setSavingRoutes(true);
@@ -776,11 +976,20 @@ const AdminPanel = () => {
     await saveRoutesToFirestore(updated);
   };
 
-  // Payment info handler
+  // ── Payment Handler ───────────────────────────────────────────────────────
   const handleSavePayment = async () => {
     setSavingPayment(true);
     await savePaymentInfoToFirestore(paymentInfo);
     setSavingPayment(false);
+  };
+
+  // ── Company Info Handler ──────────────────────────────────────────────────
+  const handleSaveCompanyInfo = async () => {
+    setSavingCompanyInfo(true);
+    setCompanyInfo(companyInfoInput);
+    saveCompanyInfoLocal(companyInfoInput);
+    await saveCompanyInfoToFirestore(companyInfoInput);
+    setSavingCompanyInfo(false);
   };
 
   const activeBookingForCar = bookings.find(b => b.id === carPopup);
@@ -805,14 +1014,17 @@ const AdminPanel = () => {
   return (
     <div className="min-h-screen bg-background">
 
-      {/* ── New Booking Alert Popup ── */}
+      {/* Full Image Popup */}
+      {viewCarImage && (
+        <FullImagePopup url={viewCarImage.url} carName={viewCarImage.car} onClose={() => setViewCarImage(null)} />
+      )}
+
+      {/* New Booking Alert */}
       {showNewBookingPopup && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in-up">
           <div className="bg-card border-2 border-primary rounded-2xl shadow-2xl shadow-primary/30 max-w-md w-full overflow-hidden">
-            {/* Glow bar */}
             <div className="h-1.5 w-full bg-gradient-to-r from-primary via-red-400 to-primary animate-pulse" />
             <div className="p-6">
-              {/* Icon + Title */}
               <div className="flex items-center gap-4 mb-5">
                 <div className="relative flex-shrink-0">
                   <div className="bg-primary/20 border-2 border-primary/50 p-3.5 rounded-2xl">
@@ -829,8 +1041,6 @@ const AdminPanel = () => {
                   <p className="text-sm text-muted-foreground mt-0.5">Pending approval in your dashboard</p>
                 </div>
               </div>
-
-              {/* Booking list preview */}
               <div className="space-y-2 mb-5 max-h-48 overflow-y-auto">
                 {newBookingsForPopup.slice(0, 4).map(b => (
                   <div key={b.id} className="flex items-center gap-3 bg-primary/8 border border-primary/20 rounded-xl p-3">
@@ -846,19 +1056,13 @@ const AdminPanel = () => {
                   <p className="text-xs text-center text-muted-foreground pt-1">+{newBookingsForPopup.length - 4} more bookings</p>
                 )}
               </div>
-
-              {/* Actions */}
               <div className="flex gap-3">
-                <button
-                  onClick={() => { setActiveTab('bookings'); dismissNewBookingPopup(); }}
-                  className="flex-1 bg-primary text-primary-foreground py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all hover:scale-[1.02] shadow-lg shadow-primary/30 flex items-center justify-center gap-2"
-                >
+                <button onClick={() => { setActiveTab('bookings'); dismissNewBookingPopup(); }}
+                  className="flex-1 bg-primary text-primary-foreground py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all hover:scale-[1.02] shadow-lg shadow-primary/30 flex items-center justify-center gap-2">
                   <CalendarCheck className="w-4 h-4" /> View Bookings
                 </button>
-                <button
-                  onClick={dismissNewBookingPopup}
-                  className="px-5 py-3 border border-border rounded-xl text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-all"
-                >
+                <button onClick={dismissNewBookingPopup}
+                  className="px-5 py-3 border border-border rounded-xl text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-all">
                   Dismiss
                 </button>
               </div>
@@ -889,10 +1093,8 @@ const AdminPanel = () => {
         <div className="flex flex-wrap gap-2 items-center">
           {/* Notification Bell */}
           <div className="relative">
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="relative bg-primary/15 border border-primary/50 p-2.5 rounded-xl hover:bg-primary/25 transition-all hover:scale-105"
-            >
+            <button onClick={() => setShowNotifications(!showNotifications)}
+              className="relative bg-primary/15 border border-primary/50 p-2.5 rounded-xl hover:bg-primary/25 transition-all hover:scale-105">
               <Bell className="w-5 h-5 text-primary" />
               {unreadCount > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center animate-pulse">
@@ -943,8 +1145,6 @@ const AdminPanel = () => {
             <div className="text-xl font-bold text-green-400">{approvedCount}</div>
             <div className="text-[10px] text-muted-foreground uppercase">Approved</div>
           </div>
-
-          {/* Revenue Stats */}
           <div className="glass-card px-3 py-2 text-center min-w-[70px] hover:scale-105 transition-transform border-green-500/30">
             <div className="text-xl font-bold text-green-400">Rs {formatRevenue(collectedRevenue)}</div>
             <div className="text-[10px] text-green-400/70 uppercase">Collected</div>
@@ -953,7 +1153,6 @@ const AdminPanel = () => {
             <div className="text-xl font-bold text-orange-400">Rs {formatRevenue(pendingRevenue)}</div>
             <div className="text-[10px] text-orange-400/70 uppercase">Pending</div>
           </div>
-
           {urgentCount > 0 && (
             <div className="glass-card px-3 py-2 text-center min-w-[70px] border-destructive hover:scale-105 transition-transform">
               <div className="text-xl font-bold text-destructive">{urgentCount}</div>
@@ -978,11 +1177,8 @@ const AdminPanel = () => {
           { id: 'routes', label: 'Routes', icon: <MapPin className="w-4 h-4" /> },
           { id: 'settings', label: 'Settings', icon: <Settings className="w-4 h-4" /> },
         ] as { id: AdminTab; label: string; icon: React.ReactNode }[]).map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-t-xl text-sm font-semibold border-b-2 transition-all ${activeTab === tab.id ? 'bg-card border-primary text-primary' : 'bg-card/50 border-transparent text-muted-foreground hover:text-foreground hover:bg-card'}`}
-          >
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-t-xl text-sm font-semibold border-b-2 transition-all ${activeTab === tab.id ? 'bg-card border-primary text-primary' : 'bg-card/50 border-transparent text-muted-foreground hover:text-foreground hover:bg-card'}`}>
             {tab.icon} {tab.label}
           </button>
         ))}
@@ -1032,18 +1228,14 @@ const AdminPanel = () => {
                           <div className="text-[10px] text-muted-foreground mt-0.5">{b.startDate}</div>
                         </td>
                         <td className="p-3">
-                          <button
-                            onClick={() => setStatusPopup(b.id)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border cursor-pointer transition-all hover:scale-105 ${b.status === 'approved' ? 'bg-green-500/20 border-green-500 text-green-400 hover:bg-green-500/30' : 'bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30'}`}
-                          >
+                          <button onClick={() => setStatusPopup(b.id)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border cursor-pointer transition-all hover:scale-105 ${b.status === 'approved' ? 'bg-green-500/20 border-green-500 text-green-400 hover:bg-green-500/30' : 'bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30'}`}>
                             {b.status === 'approved' ? 'Approved' : 'Pending'}
                           </button>
                         </td>
                         <td className="p-3">
-                          <button
-                            onClick={() => setCarPopup(b.id)}
-                            className="px-3 py-1.5 bg-primary/15 border border-primary/50 rounded-lg text-xs font-medium hover:bg-primary/25 hover:scale-105 transition-all max-w-[180px] truncate"
-                          >
+                          <button onClick={() => setCarPopup(b.id)}
+                            className="px-3 py-1.5 bg-primary/15 border border-primary/50 rounded-lg text-xs font-medium hover:bg-primary/25 hover:scale-105 transition-all max-w-[180px] truncate">
                             {b.assignedCar ? (
                               <span className="flex items-center gap-1">
                                 {carImages[b.assignedCar] && (
@@ -1051,12 +1243,12 @@ const AdminPanel = () => {
                                 )}
                                 <Car className="w-3 h-3 inline" />{b.assignedCar}
                               </span>
-                            ) : 'Select Car'}
+                            ) : <span className="text-orange-400">Select Car</span>}
                           </button>
                         </td>
                         <td className="p-3">
                           <div className="flex gap-1.5">
-                            <button onClick={() => generateInvoicePDF(b)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
+                            <button onClick={() => generateInvoicePDF(b, carImages, companyInfo)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
                             <button onClick={() => sendWhatsApp(b)} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="WhatsApp"><MessageCircle className="w-4 h-4 text-green-400" /></button>
                             <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
                           </div>
@@ -1086,7 +1278,10 @@ const AdminPanel = () => {
                   <div className="mb-4">
                     <label className="text-xs text-muted-foreground uppercase tracking-wider font-semibold mb-2 block">Pickup Locations</label>
                     <div className="flex gap-2">
-                      <input value={newPickup} onChange={e => setNewPickup(e.target.value)} placeholder="Add pickup location" className="flex-1 px-3 py-2.5 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none hover:border-primary/50 transition-colors" />
+                      <input value={newPickup} onChange={e => setNewPickup(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addPickup()}
+                        placeholder="Add pickup location"
+                        className="flex-1 px-3 py-2.5 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none hover:border-primary/50 transition-colors" />
                       <button onClick={addPickup} className="bg-primary text-primary-foreground px-3 py-2.5 rounded-lg text-sm font-bold hover:bg-primary/80 hover:scale-105 transition-all"><Plus className="w-4 h-4" /></button>
                     </div>
                   </div>
@@ -1110,8 +1305,7 @@ const AdminPanel = () => {
                       {pickups.map(p => (
                         <button key={p}
                           onClick={() => setSelectedPickupForDrop(selectedPickupForDrop === p ? '' : p)}
-                          className={`w-full p-2.5 border rounded-lg text-sm text-left transition-all flex items-center justify-between hover:scale-[1.02] ${selectedPickupForDrop === p ? 'bg-primary/20 border-primary' : 'bg-primary/5 border-border hover:bg-primary/10 hover:border-primary/50'}`}
-                        >
+                          className={`w-full p-2.5 border rounded-lg text-sm text-left transition-all flex items-center justify-between hover:scale-[1.02] ${selectedPickupForDrop === p ? 'bg-primary/20 border-primary' : 'bg-primary/5 border-border hover:bg-primary/10 hover:border-primary/50'}`}>
                           <span className="flex items-center gap-2">
                             <MapPin className="w-3.5 h-3.5 text-primary" /> {p}
                           </span>
@@ -1126,7 +1320,10 @@ const AdminPanel = () => {
                           <span className="text-xs font-semibold text-primary uppercase">Drop-offs for {selectedPickupForDrop}</span>
                         </div>
                         <div className="flex gap-2 mb-3">
-                          <input value={newDropoff} onChange={e => setNewDropoff(e.target.value)} placeholder="Add dropoff" className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none" />
+                          <input value={newDropoff} onChange={e => setNewDropoff(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && addDropoff()}
+                            placeholder="Add dropoff"
+                            className="flex-1 px-3 py-2 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none" />
                           <button onClick={addDropoff} className="bg-primary text-primary-foreground px-3 py-2 rounded-lg text-sm font-bold hover:bg-primary/80 transition-colors"><Plus className="w-4 h-4" /></button>
                         </div>
                         <div className="flex flex-col gap-1.5">
@@ -1136,7 +1333,7 @@ const AdminPanel = () => {
                             (dropMap[selectedPickupForDrop] || []).map(d => (
                               <div key={d} className="bg-accent/20 border border-border rounded-lg px-3 py-2 flex items-center justify-between hover:border-primary transition-all group">
                                 <span className="flex items-center gap-2 text-sm">
-                                  <ChevronRightIcon className="w-3 h-3 text-primary" /> {d}
+                                  <ChevronRight className="w-3 h-3 text-primary" /> {d}
                                 </span>
                                 <button onClick={() => confirmDeleteDropoff(selectedPickupForDrop, d)} className="text-destructive/50 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100">
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -1168,7 +1365,7 @@ const AdminPanel = () => {
               )}
             </div>
 
-            {/* Route Info Panel */}
+            {/* Route Overview */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <h3 className="text-primary font-display font-bold text-lg mb-5 pb-3 border-b border-border flex items-center gap-2">
                 <MapPin className="w-5 h-5" /> Route Overview
@@ -1183,7 +1380,7 @@ const AdminPanel = () => {
                     <div className="flex flex-col gap-1.5">
                       {(dropMap[p] || []).map(d => (
                         <div key={d} className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <ChevronRightIcon className="w-3 h-3 text-primary/60" /> {d}
+                          <ChevronRight className="w-3 h-3 text-primary/60" /> {d}
                         </div>
                       ))}
                       {(dropMap[p] || []).length === 0 && (
@@ -1201,6 +1398,41 @@ const AdminPanel = () => {
         {activeTab === 'settings' && (
           <div className="flex flex-col gap-6">
 
+            {/* ── Company Info ── */}
+            <div className="bg-card border border-border rounded-2xl p-5">
+              <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
+                <Building2 className="w-5 h-5" /> Company Information
+              </h3>
+              <p className="text-xs text-muted-foreground mb-5">This information appears on all generated invoices. Changes take effect immediately on new invoices.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {([
+                  { key: 'name', label: 'Company Name', placeholder: 'Car Lift', icon: <Building2 className="w-4 h-4" /> },
+                  { key: 'tagline', label: 'Tagline / Service Description', placeholder: 'Premium Monthly Car Service', icon: <Settings className="w-4 h-4" /> },
+                  { key: 'phone', label: 'Phone / WhatsApp', placeholder: '03089926777', icon: <Phone className="w-4 h-4" /> },
+                  { key: 'email', label: 'Email Address', placeholder: '777carcare@gmail.com', icon: <Mail className="w-4 h-4" /> },
+                  { key: 'address', label: 'Main Address', placeholder: 'Plot 1/2, North Nazimabad, Karachi', icon: <MapPin className="w-4 h-4" /> },
+                  { key: 'address2', label: 'Secondary Address (optional)', placeholder: 'Workshop: Gulistan-e-Johar', icon: <MapPin className="w-4 h-4" /> },
+                ] as { key: keyof CompanyInfo; label: string; placeholder: string; icon: React.ReactNode }[]).map(({ key, label, placeholder, icon }) => (
+                  <div key={key}>
+                    <label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5 block">
+                      {icon} {label}
+                    </label>
+                    <input
+                      value={companyInfoInput[key]}
+                      onChange={e => setCompanyInfoInput(prev => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-foreground text-sm focus:border-primary focus:outline-none transition-colors"
+                    />
+                  </div>
+                ))}
+              </div>
+              <button onClick={handleSaveCompanyInfo} disabled={savingCompanyInfo}
+                className="mt-5 bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50">
+                {savingCompanyInfo ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                {savingCompanyInfo ? 'Saving...' : 'Save Company Info'}
+              </button>
+            </div>
+
             {/* ── Routes Management ── */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
@@ -1208,26 +1440,21 @@ const AdminPanel = () => {
               </h3>
               <p className="text-xs text-muted-foreground mb-4">Add, edit or delete routes. Changes reflect instantly in the user panel.</p>
 
-              {/* Existing routes list */}
               <div className="flex flex-col gap-2 mb-5">
                 {routes.map(route => (
                   <div key={route.id} className="bg-primary/5 border border-border rounded-xl p-3 hover:border-primary/40 transition-all">
                     {editingRoute?.id === route.id ? (
                       <div className="flex flex-col gap-2">
-                        <input
-                          value={editingRoute.title}
-                          onChange={e => setEditingRoute({ ...editingRoute, title: e.target.value })}
+                        <input value={editingRoute.title} onChange={e => setEditingRoute({ ...editingRoute, title: e.target.value })}
                           placeholder="Route title (From → To)"
-                          className="px-3 py-2 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none w-full"
-                        />
-                        <input
-                          value={editingRoute.timings.join(', ')}
+                          className="px-3 py-2 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none w-full" />
+                        <input value={editingRoute.timings.join(', ')}
                           onChange={e => setEditingRoute({ ...editingRoute, timings: e.target.value.split(',').map(t => t.trim()).filter(Boolean) })}
                           placeholder="Timings (comma-separated)"
-                          className="px-3 py-2 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none w-full"
-                        />
+                          className="px-3 py-2 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none w-full" />
                         <div className="flex gap-2">
-                          <button onClick={handleSaveEditRoute} disabled={savingRoutes} className="bg-primary text-primary-foreground px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-primary/85 transition-all flex items-center gap-1.5 disabled:opacity-50">
+                          <button onClick={handleSaveEditRoute} disabled={savingRoutes}
+                            className="bg-primary text-primary-foreground px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-primary/85 transition-all flex items-center gap-1.5 disabled:opacity-50">
                             {savingRoutes ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Save
                           </button>
                           <button onClick={() => setEditingRoute(null)} className="bg-muted px-4 py-1.5 rounded-lg text-xs font-medium hover:bg-muted/80 transition-all">Cancel</button>
@@ -1259,27 +1486,17 @@ const AdminPanel = () => {
                 ))}
               </div>
 
-              {/* Add new route */}
               <div className="bg-primary/5 border border-primary/20 rounded-xl p-4">
                 <p className="text-xs font-semibold text-primary uppercase tracking-wider mb-3">Add New Route</p>
                 <div className="flex flex-col gap-2">
-                  <input
-                    value={newRouteTitle}
-                    onChange={e => setNewRouteTitle(e.target.value)}
+                  <input value={newRouteTitle} onChange={e => setNewRouteTitle(e.target.value)}
                     placeholder="Route title, e.g. Gulistan-e-Johar → PECHS"
-                    className="px-3 py-2.5 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none"
-                  />
-                  <input
-                    value={newRouteTiming}
-                    onChange={e => setNewRouteTiming(e.target.value)}
+                    className="px-3 py-2.5 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none" />
+                  <input value={newRouteTiming} onChange={e => setNewRouteTiming(e.target.value)}
                     placeholder="Timing(s), e.g. 7:30 AM – 1:45 PM, 10:00 AM – 6:00 PM"
-                    className="px-3 py-2.5 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none"
-                  />
-                  <button
-                    onClick={handleAddRoute}
-                    disabled={savingRoutes || !newRouteTitle.trim() || !newRouteTiming.trim()}
-                    className="bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-bold hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
+                    className="px-3 py-2.5 bg-input border border-primary/50 rounded-lg text-sm text-foreground focus:border-primary focus:outline-none" />
+                  <button onClick={handleAddRoute} disabled={savingRoutes || !newRouteTitle.trim() || !newRouteTiming.trim()}
+                    className="bg-primary text-primary-foreground px-4 py-2.5 rounded-lg text-sm font-bold hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
                     {savingRoutes ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Add Route
                   </button>
                 </div>
@@ -1292,41 +1509,30 @@ const AdminPanel = () => {
                 <TrendingUp className="w-5 h-5" /> Fare Rate Per KM
               </h3>
               <p className="text-xs text-muted-foreground mb-5">
-                Set the per-kilometre rate. The user booking page will instantly calculate the monthly fare using this rate × real driving distance × 22 days + 11% SRB tax.
+                Set the per-kilometre rate. Calculates monthly fare using this rate × real driving distance × working days + 11% SRB tax.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 items-end">
                 <div className="flex-1">
                   <label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">Rate (Rs per km)</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary font-bold text-sm">Rs</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={fareRateInput}
-                      onChange={e => setFareRateInput(e.target.value)}
-                      className="w-full pl-10 pr-16 py-3 bg-input border border-primary/50 rounded-xl text-foreground font-bold text-lg focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors"
-                    />
+                    <input type="number" min="1" step="1" value={fareRateInput} onChange={e => setFareRateInput(e.target.value)}
+                      className="w-full pl-10 pr-16 py-3 bg-input border border-primary/50 rounded-xl text-foreground font-bold text-lg focus:border-primary focus:outline-none transition-colors" />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">/km</span>
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <div className="text-xs text-muted-foreground text-center sm:text-left">
-                    Current: <span className="text-primary font-bold">Rs {farePerKm}/km</span>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const rate = parseFloat(fareRateInput);
-                      if (!rate || rate < 1) return;
-                      setSavingFareRate(true);
-                      await saveFarePerKmToFirestore(rate);
-                      setFarePerKm(rate);
-                      saveFarePerKmLocal(rate);
-                      setSavingFareRate(false);
-                    }}
-                    disabled={savingFareRate || !fareRateInput || parseFloat(fareRateInput) < 1}
-                    className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50"
-                  >
+                  <div className="text-xs text-muted-foreground">Current: <span className="text-primary font-bold">Rs {farePerKm}/km</span></div>
+                  <button onClick={async () => {
+                    const rate = parseFloat(fareRateInput);
+                    if (!rate || rate < 1) return;
+                    setSavingFareRate(true);
+                    await saveFarePerKmToFirestore(rate);
+                    setFarePerKm(rate);
+                    saveFarePerKmLocal(rate);
+                    setSavingFareRate(false);
+                  }} disabled={savingFareRate || !fareRateInput || parseFloat(fareRateInput) < 1}
+                    className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50">
                     {savingFareRate ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                     {savingFareRate ? 'Saving...' : 'Save Rate'}
                   </button>
@@ -1334,52 +1540,37 @@ const AdminPanel = () => {
               </div>
               <div className="mt-4 p-3 bg-primary/5 border border-primary/20 rounded-xl">
                 <p className="text-xs text-muted-foreground">
-                  <span className="text-primary font-semibold">Example:</span> At Rs {farePerKm}/km for a 10 km route — monthly fare = {Math.round(10 * farePerKm * 22 * 1.11).toLocaleString()} PKR
+                  <span className="text-primary font-semibold">Example:</span> At Rs {farePerKm}/km for 10 km — monthly fare = {Math.round(10 * farePerKm * 22 * 1.11).toLocaleString()} PKR
                 </p>
               </div>
             </div>
 
-            {/* ── Working Days Per Month ── */}
+            {/* ── Working Days ── */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
                 <CalendarCheck className="w-5 h-5" /> Monthly Working Days
               </h3>
               <p className="text-xs text-muted-foreground mb-5">
-                Set the base working days per month (weekdays only). Users can additionally select Saturdays (+4 days) or Saturday &amp; Sunday (+8 days). Total days are used in fare calculation.
+                Set the base working days per month (weekdays only). Users can add Saturdays (+4) or Sat &amp; Sun (+8).
               </p>
               <div className="flex flex-col sm:flex-row gap-3 items-end">
                 <div className="flex-1">
                   <label className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 block">Base Working Days</label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      step="1"
-                      value={workingDaysInput}
-                      onChange={e => setWorkingDaysInput(e.target.value)}
-                      className="w-full px-4 pr-20 py-3 bg-input border border-primary/50 rounded-xl text-foreground font-bold text-lg focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 transition-colors"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">days/month</span>
-                  </div>
+                  <input type="number" min="1" max="31" step="1" value={workingDaysInput} onChange={e => setWorkingDaysInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-input border border-primary/50 rounded-xl text-foreground font-bold text-lg focus:border-primary focus:outline-none transition-colors" />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <div className="text-xs text-muted-foreground text-center sm:text-left">
-                    Current: <span className="text-primary font-bold">{workingDays} days</span>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const days = parseInt(workingDaysInput, 10);
-                      if (!days || days < 1 || days > 31) return;
-                      setSavingWorkingDays(true);
-                      await saveWorkingDaysToFirestore(days);
-                      setWorkingDays(days);
-                      saveWorkingDaysLocal(days);
-                      setSavingWorkingDays(false);
-                    }}
-                    disabled={savingWorkingDays || !workingDaysInput || parseInt(workingDaysInput, 10) < 1}
-                    className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50"
-                  >
+                  <div className="text-xs text-muted-foreground">Current: <span className="text-primary font-bold">{workingDays} days</span></div>
+                  <button onClick={async () => {
+                    const days = parseInt(workingDaysInput, 10);
+                    if (!days || days < 1 || days > 31) return;
+                    setSavingWorkingDays(true);
+                    await saveWorkingDaysToFirestore(days);
+                    setWorkingDays(days);
+                    saveWorkingDaysLocal(days);
+                    setSavingWorkingDays(false);
+                  }} disabled={savingWorkingDays || !workingDaysInput || parseInt(workingDaysInput, 10) < 1}
+                    className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50">
                     {savingWorkingDays ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                     {savingWorkingDays ? 'Saving...' : 'Save Days'}
                   </button>
@@ -1399,13 +1590,12 @@ const AdminPanel = () => {
               </div>
             </div>
 
-            {/* ── Payment Info Management ── */}
+            {/* ── Payment Info ── */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
                 <DollarSign className="w-5 h-5" /> Payment Account Details
               </h3>
-              <p className="text-xs text-muted-foreground mb-5">Set your account details. When a user taps a payment method, a popup shows these details with a copy button.</p>
-
+              <p className="text-xs text-muted-foreground mb-5">These details show when users tap a payment method in the booking form.</p>
               <div className="flex flex-col gap-4">
                 {([
                   { key: 'easypaisa', label: 'Easypaisa', color: 'text-green-400 border-green-500/30 bg-green-500/5' },
@@ -1417,98 +1607,104 @@ const AdminPanel = () => {
                     <div className="flex flex-col gap-2">
                       <div>
                         <label className="text-xs uppercase tracking-wider opacity-70 mb-1 block">Account Name</label>
-                        <input
-                          value={paymentInfo[key].accName}
+                        <input value={paymentInfo[key].accName}
                           onChange={e => setPaymentInfo(prev => ({ ...prev, [key]: { ...prev[key], accName: e.target.value } }))}
-                          placeholder={`${label} account name`}
-                          className="w-full px-3 py-2 bg-input border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                        />
+                          placeholder="Account holder name"
+                          className="w-full px-3 py-2 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none" />
                       </div>
                       <div>
                         <label className="text-xs uppercase tracking-wider opacity-70 mb-1 block">Account Number</label>
-                        <input
-                          value={paymentInfo[key].accNumber}
+                        <input value={paymentInfo[key].accNumber}
                           onChange={e => setPaymentInfo(prev => ({ ...prev, [key]: { ...prev[key], accNumber: e.target.value } }))}
-                          placeholder={`${label} number`}
-                          className="w-full px-3 py-2 bg-input border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                        />
+                          placeholder="Account / IBAN number"
+                          className="w-full px-3 py-2 bg-input border border-border rounded-lg text-sm text-foreground focus:border-primary focus:outline-none" />
                       </div>
                     </div>
                   </div>
                 ))}
-                <button
-                  onClick={handleSavePayment}
-                  disabled={savingPayment}
-                  className="bg-primary text-primary-foreground py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {savingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                  {savingPayment ? 'Saving...' : 'Save Payment Details'}
-                </button>
               </div>
+              <button onClick={handleSavePayment} disabled={savingPayment}
+                className="mt-4 w-full bg-primary text-primary-foreground py-3 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                {savingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {savingPayment ? 'Saving...' : 'Save Payment Details'}
+              </button>
             </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Car Image Management */}
+            {/* ── Car Images + Cars Management ── */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
-                <Image className="w-5 h-5" /> Car Images
+                <Car className="w-5 h-5" /> Fleet Management
               </h3>
-              <p className="text-xs text-muted-foreground mb-5">Upload photos from your phone or PC. Tap the <span className="text-primary font-semibold">image icon</span> next to any car to select a photo. Works on mobile camera too.</p>
+              <p className="text-xs text-muted-foreground mb-4">Add vehicles to the fleet and upload their photos. Tap the image icon to upload. Tap the photo to view full size.</p>
+
+              {/* Add new car */}
+              <div className="flex gap-2 mb-5">
+                <input value={newCarName} onChange={e => setNewCarName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAddCar()}
+                  placeholder="Car name, e.g. Suzuki Alto 2024 White ABC 123"
+                  className="flex-1 px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none transition-colors" />
+                <button onClick={handleAddCar} disabled={addingCar || !newCarName.trim()}
+                  className="bg-primary text-primary-foreground px-3 py-2.5 rounded-xl font-bold hover:bg-primary/80 hover:scale-105 transition-all disabled:opacity-50">
+                  {addingCar ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                </button>
+              </div>
 
               <div className="flex flex-col gap-3">
-                {CARS_LIST.map(car => (
+                {carsList.map(car => (
                   <div key={car} className="bg-primary/5 border border-border rounded-xl p-3 hover:border-primary/40 transition-all">
-                    <div className="flex items-center gap-3 mb-2">
-                      {carImages[car] ? (
-                        <img
-                          src={carImages[car]}
-                          alt={car}
-                          className="w-14 h-10 object-cover rounded-lg border border-primary/30 flex-shrink-0"
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
-                      ) : (
-                        <div className="w-14 h-10 bg-primary/10 rounded-lg border border-border flex items-center justify-center flex-shrink-0">
-                          <Car className="w-5 h-5 text-primary/40" />
-                        </div>
-                      )}
+                    <div className="flex items-center gap-3">
+                      {/* Clickable thumbnail */}
+                      <button
+                        onClick={() => carImages[car] && setViewCarImage({ car, url: carImages[car] })}
+                        className={`flex-shrink-0 ${carImages[car] ? 'cursor-zoom-in' : 'cursor-default'}`}
+                        title={carImages[car] ? "View full image" : "No image yet"}
+                      >
+                        {carImages[car] ? (
+                          <img src={carImages[car]} alt={car}
+                            className="w-16 h-11 object-cover rounded-lg border border-primary/30 hover:border-primary transition-colors"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        ) : (
+                          <div className="w-16 h-11 bg-primary/10 rounded-lg border border-border flex items-center justify-center">
+                            <Car className="w-5 h-5 text-primary/40" />
+                          </div>
+                        )}
+                      </button>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">{car}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {carImages[car] ? 'Image set' : 'No image'}
+                        <p className="text-xs text-muted-foreground">
+                          {uploadingCar === car ? (
+                            <span className="text-primary flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Uploading...</span>
+                          ) : carImages[car] ? (
+                            <span className="text-green-400">Image uploaded</span>
+                          ) : 'No image'}
                         </p>
                       </div>
                       <div className="flex gap-1.5 flex-shrink-0">
-                        {/* Hidden file input */}
-                        <label
-                          htmlFor={`car-img-${car.replace(/\s/g, '-')}`}
+                        <label htmlFor={`car-img-${car.replace(/\s/g, '-')}`}
                           className="cursor-pointer bg-primary/20 hover:bg-primary/30 p-1.5 rounded-lg transition-all hover:scale-110 flex items-center"
-                          title="Upload photo from device"
-                        >
-                          {uploadingCar === car
-                            ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                            : <Image className="w-3.5 h-3.5 text-primary" />}
+                          title="Upload photo">
+                          {uploadingCar === car ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <Image className="w-3.5 h-3.5 text-primary" />}
                         </label>
-                        <input
-                          id={`car-img-${car.replace(/\s/g, '-')}`}
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
+                        <input id={`car-img-${car.replace(/\s/g, '-')}`} type="file" accept="image/*" capture="environment"
                           className="hidden"
                           onChange={e => {
                             const file = e.target.files?.[0];
                             if (file) compressAndSave(car, file);
                             e.target.value = '';
-                          }}
-                        />
+                          }} />
                         {carImages[car] && (
-                          <button
-                            onClick={() => handleRemoveCarImage(car)}
+                          <button onClick={() => handleRemoveCarImage(car)}
                             className="bg-destructive/20 hover:bg-destructive/30 p-1.5 rounded-lg transition-all hover:scale-110"
-                            title="Remove image"
-                          >
+                            title="Remove image">
                             <Trash2 className="w-3.5 h-3.5 text-destructive" />
                           </button>
                         )}
+                        <button onClick={() => setDeleteTarget({ type: 'car', name: car })}
+                          className="bg-destructive/10 hover:bg-destructive/20 p-1.5 rounded-lg transition-all hover:scale-110 opacity-50 hover:opacity-100"
+                          title="Remove car from fleet">
+                          <X className="w-3.5 h-3.5 text-destructive" />
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1524,9 +1720,7 @@ const AdminPanel = () => {
                 </h3>
                 <div className="grid grid-cols-1 gap-3">
                   <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-center gap-4">
-                    <div className="bg-primary/20 p-3 rounded-xl">
-                      <DollarSign className="w-6 h-6 text-primary" />
-                    </div>
+                    <div className="bg-primary/20 p-3 rounded-xl"><DollarSign className="w-6 h-6 text-primary" /></div>
                     <div>
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Generated</p>
                       <p className="text-2xl font-bold text-primary">Rs {totalRevenue.toLocaleString()}</p>
@@ -1534,9 +1728,7 @@ const AdminPanel = () => {
                     </div>
                   </div>
                   <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-center gap-4">
-                    <div className="bg-green-500/20 p-3 rounded-xl">
-                      <CheckCircle className="w-6 h-6 text-green-400" />
-                    </div>
+                    <div className="bg-green-500/20 p-3 rounded-xl"><CheckCircle className="w-6 h-6 text-green-400" /></div>
                     <div>
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">Collected (Approved)</p>
                       <p className="text-2xl font-bold text-green-400">Rs {collectedRevenue.toLocaleString()}</p>
@@ -1544,9 +1736,7 @@ const AdminPanel = () => {
                     </div>
                   </div>
                   <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4 flex items-center gap-4">
-                    <div className="bg-orange-500/20 p-3 rounded-xl">
-                      <Clock className="w-6 h-6 text-orange-400" />
-                    </div>
+                    <div className="bg-orange-500/20 p-3 rounded-xl"><Clock className="w-6 h-6 text-orange-400" /></div>
                     <div>
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">Pending Revenue</p>
                       <p className="text-2xl font-bold text-orange-400">Rs {pendingRevenue.toLocaleString()}</p>
@@ -1562,14 +1752,15 @@ const AdminPanel = () => {
                   <Car className="w-5 h-5" /> Per-Vehicle Revenue
                 </h3>
                 <div className="flex flex-col gap-2">
-                  {CARS_LIST.map(car => {
+                  {carsList.map(car => {
                     const carBookings = bookings.filter(b => b.assignedCar === car);
                     if (carBookings.length === 0) return null;
                     const carRevenue = carBookings.reduce((s, b) => s + parseFareAmount(b.fare), 0);
                     return (
                       <div key={car} className="flex items-center gap-3 bg-primary/5 border border-border rounded-lg px-3 py-2.5 hover:border-primary transition-all">
                         {carImages[car] ? (
-                          <img src={carImages[car]} alt="" className="w-10 h-7 object-cover rounded flex-shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          <img src={carImages[car]} alt="" className="w-10 h-7 object-cover rounded flex-shrink-0"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                         ) : (
                           <Car className="w-5 h-5 text-primary/60 flex-shrink-0" />
                         )}
@@ -1586,7 +1777,6 @@ const AdminPanel = () => {
                   )}
                 </div>
               </div>
-
             </div>
           </div>
           </div>
@@ -1594,14 +1784,33 @@ const AdminPanel = () => {
       </div>
 
       {/* Status Popup */}
-      <PopupModal open={statusPopup !== null} onClose={() => setStatusPopup(null)} title="Update Booking Status">
+      <PopupModal open={statusPopup !== null} onClose={() => { setStatusPopup(null); setApproveError(null); }} title="Update Booking Status">
         {activeBookingForStatus && (
           <div>
             <p className="text-sm text-muted-foreground mb-4">
               Change status for <span className="text-foreground font-semibold">{activeBookingForStatus.name}</span>
             </p>
-            <PopupOption label="Pending" icon={<Clock className="w-4 h-4 text-orange-400" />} active={activeBookingForStatus.status === 'pending'} onClick={() => updateStatus(activeBookingForStatus.id, 'pending')} />
-            <PopupOption label="Approved" icon={<CheckCircle className="w-4 h-4 text-green-400" />} active={activeBookingForStatus.status === 'approved'} onClick={() => updateStatus(activeBookingForStatus.id, 'approved')} />
+            {approveError === activeBookingForStatus.id && (
+              <div className="bg-destructive/15 border border-destructive/40 text-destructive text-sm px-4 py-3 rounded-xl flex items-center gap-2 mb-4">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                A car must be assigned before approving this booking.
+              </div>
+            )}
+            <button onClick={() => updateStatus(activeBookingForStatus.id, 'pending')}
+              className={`w-full p-3 my-1.5 border rounded-lg text-left text-sm font-medium transition-all flex items-center gap-3 hover:scale-[1.02] ${activeBookingForStatus.status === 'pending' ? 'bg-primary/30 border-primary' : 'bg-primary/10 border-border hover:bg-primary/20 hover:border-primary'}`}>
+              <Clock className="w-4 h-4 text-orange-400" />
+              <span className="flex-1">Pending</span>
+              {activeBookingForStatus.status === 'pending' && <CheckCircle className="w-4 h-4 text-primary" />}
+            </button>
+            <button onClick={() => updateStatus(activeBookingForStatus.id, 'approved')}
+              className={`w-full p-3 my-1.5 border rounded-lg text-left text-sm font-medium transition-all flex items-center gap-3 hover:scale-[1.02] ${activeBookingForStatus.status === 'approved' ? 'bg-primary/30 border-primary' : 'bg-primary/10 border-border hover:bg-primary/20 hover:border-primary'}`}>
+              <CheckCircle className="w-4 h-4 text-green-400" />
+              <span className="flex-1">Approved</span>
+              {!activeBookingForStatus.assignedCar && (
+                <span className="text-xs text-orange-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Assign car first</span>
+              )}
+              {activeBookingForStatus.status === 'approved' && <CheckCircle className="w-4 h-4 text-primary" />}
+            </button>
           </div>
         )}
       </PopupModal>
@@ -1613,15 +1822,26 @@ const AdminPanel = () => {
             <p className="text-sm text-muted-foreground mb-4">
               Assign car for <span className="text-foreground font-semibold">{activeBookingForCar.name}</span>
             </p>
-            {CARS_LIST.map(c => (
-              <PopupOption key={c} label={c}
+            <p className="text-xs text-primary/70 mb-3 flex items-center gap-1">
+              <Image className="w-3 h-3" /> Tap the car photo to view full image
+            </p>
+            {carsList.map(c => (
+              <PopupOption
+                key={c}
+                label={c}
                 icon={
-                  carImages[c]
-                    ? <img src={carImages[c]} alt="" className="w-8 h-6 object-cover rounded" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                    : <Car className="w-4 h-4 text-primary" />
+                  carImages[c] ? (
+                    <img src={carImages[c]} alt="" className="w-10 h-7 object-cover rounded border border-primary/20"
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  ) : (
+                    <div className="w-10 h-7 bg-primary/10 rounded border border-border flex items-center justify-center">
+                      <Car className="w-4 h-4 text-primary/40" />
+                    </div>
+                  )
                 }
                 active={activeBookingForCar.assignedCar === c}
                 onClick={() => assignCar(activeBookingForCar.id, c)}
+                onImageClick={carImages[c] ? (e) => { e.stopPropagation(); setViewCarImage({ car: c, url: carImages[c] }); } : undefined}
               />
             ))}
           </div>
@@ -1638,9 +1858,5 @@ const AdminPanel = () => {
     </div>
   );
 };
-
-const ChevronRightIcon = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m9 18 6-6-6-6"/></svg>
-);
 
 export default AdminPanel;

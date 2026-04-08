@@ -3,8 +3,9 @@ import {
   query, orderBy, where, deleteDoc, updateDoc, addDoc,
   serverTimestamp, getDoc
 } from 'firebase/firestore';
-import { db } from './firebase';
-import type { Booking, Notification, RouteData, PaymentInfo } from './store';
+import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
+import { db, storage } from './firebase';
+import type { Booking, Notification, RouteData, PaymentInfo, CompanyInfo } from './store';
 
 // ─── Bookings ───────────────────────────────────────────────────────────────
 
@@ -34,11 +35,11 @@ export function subscribeToBookings(callback: (bookings: Booking[]) => void): ()
 export function subscribeToUserBookings(userId: string, callback: (bookings: Booking[]) => void): () => void {
   const q = query(
     collection(db, 'bookings'),
-    where('userId', '==', userId),
-    orderBy('createdAt', 'desc')
+    where('userId', '==', userId)
   );
   const unsub = onSnapshot(q, (snap) => {
     const bookings: Booking[] = snap.docs.map(d => ({ ...d.data() } as Booking));
+    bookings.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     callback(bookings);
   }, (err) => {
     console.error('Firestore user bookings error:', err);
@@ -123,7 +124,35 @@ export async function getUserRoleFromFirestore(uid: string): Promise<'user' | 'a
   }
 }
 
-// ─── Car Images ──────────────────────────────────────────────────────────────
+export async function isAdminInFirestore(uid: string): Promise<boolean> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (snap.exists()) return snap.data().role === 'admin';
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Car Images — Firebase Storage ───────────────────────────────────────────
+
+export async function uploadCarImageToStorage(carName: string, base64DataUrl: string): Promise<string> {
+  const safeName = carName.replace(/[^a-zA-Z0-9]/g, '_');
+  const storageRef = ref(storage, `car-images/${safeName}`);
+  await uploadString(storageRef, base64DataUrl, 'data_url');
+  const downloadUrl = await getDownloadURL(storageRef);
+  return downloadUrl;
+}
+
+export async function deleteCarImageFromStorage(carName: string): Promise<void> {
+  try {
+    const safeName = carName.replace(/[^a-zA-Z0-9]/g, '_');
+    const storageRef = ref(storage, `car-images/${safeName}`);
+    await deleteObject(storageRef);
+  } catch {
+    // Ignore if file doesn't exist
+  }
+}
 
 export async function saveCarImagesToFirestore(images: Record<string, string>): Promise<void> {
   try {
@@ -141,6 +170,65 @@ export async function getCarImagesFromFirestore(): Promise<Record<string, string
   } catch {
     return {};
   }
+}
+
+// ─── Cars List ───────────────────────────────────────────────────────────────
+
+export async function saveCarsListToFirestore(cars: string[]): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'carsList'), { cars, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save cars list error:', err);
+  }
+}
+
+export function subscribeToCarsListFromFirestore(callback: (cars: string[]) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'carsList'), (snap) => {
+    if (snap.exists() && snap.data().cars) callback(snap.data().cars as string[]);
+  }, (err) => {
+    console.error('Firestore cars list subscription error:', err);
+  });
+  return unsub;
+}
+
+// ─── Locations (Pickups + Dropoffs) ──────────────────────────────────────────
+
+export async function saveLocationsToFirestore(pickups: string[], dropMap: Record<string, string[]>): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'locations'), { pickups, dropMap, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save locations error:', err);
+  }
+}
+
+export function subscribeToLocations(callback: (pickups: string[], dropMap: Record<string, string[]>) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'locations'), (snap) => {
+    if (snap.exists()) {
+      callback(snap.data().pickups || [], snap.data().dropMap || {});
+    }
+  }, (err) => {
+    console.error('Firestore locations subscription error:', err);
+  });
+  return unsub;
+}
+
+// ─── Company Info ─────────────────────────────────────────────────────────────
+
+export async function saveCompanyInfoToFirestore(info: CompanyInfo): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'companyInfo'), { ...info, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save company info error:', err);
+  }
+}
+
+export function subscribeToCompanyInfo(callback: (info: CompanyInfo) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'companyInfo'), (snap) => {
+    if (snap.exists()) callback(snap.data() as CompanyInfo);
+  }, (err) => {
+    console.error('Firestore company info subscription error:', err);
+  });
+  return unsub;
 }
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -219,3 +307,6 @@ export function subscribeToPaymentInfo(callback: (info: PaymentInfo) => void): (
   });
   return unsub;
 }
+
+// Kept for backward compat
+export { getDocs };

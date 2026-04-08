@@ -5,7 +5,7 @@ import {
   Sunrise, Sunset, Loader2, Route
 } from "lucide-react";
 import {
-  getPickupLocations, getDropoffMapping,
+  getPickupLocations, getDropoffMapping, savePickupLocations, saveDropoffMapping,
   ROUTES_DATA, calculateFare, getBookings, saveBookings,
   addNotification, type Booking, type RouteData, type PaymentInfo,
   getDistanceFromOSRM, getFarePerKmLocal, DEFAULT_FARE_PER_KM,
@@ -15,7 +15,7 @@ import {
 import {
   saveBookingToFirestore, addNotificationToFirestore,
   subscribeToRoutes, subscribeToPaymentInfo, subscribeToUserBookings,
-  subscribeToFarePerKm, subscribeToWorkingDays
+  subscribeToFarePerKm, subscribeToWorkingDays, subscribeToLocations
 } from "@/lib/firestoreStore";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, type User as FBUser } from "firebase/auth";
@@ -328,10 +328,25 @@ const BookRide = () => {
   const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const [distanceLoading, setDistanceLoading] = useState(false);
 
+  // Load from localStorage initially, then subscribe to Firestore for live updates
   useEffect(() => {
     setPickups(getPickupLocations());
     setDropMap(getDropoffMapping());
-  }, [modal]);
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeToLocations((firestorePickups, firestoreDropMap) => {
+      if (firestorePickups.length > 0) {
+        setPickups(firestorePickups);
+        savePickupLocations(firestorePickups);
+      }
+      if (Object.keys(firestoreDropMap).length > 0) {
+        setDropMap(firestoreDropMap);
+        saveDropoffMapping(firestoreDropMap);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Subscribe to Firebase auth state
   useEffect(() => {
