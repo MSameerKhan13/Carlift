@@ -934,17 +934,22 @@ const AdminPanel = () => {
     const manifest = document.getElementById('pwa-manifest') as HTMLLinkElement | null;
     const prevManifest = manifest?.href || '';
     if (manifest) manifest.href = '/manifest-admin.json';
-    let appleIcon = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon']");
-    const prevIcon = appleIcon?.href || '';
-    if (!appleIcon) {
-      appleIcon = document.createElement('link');
-      appleIcon.rel = 'apple-touch-icon';
-      document.head.appendChild(appleIcon);
-    }
-    appleIcon.href = '/icon-admin.png';
+    // Remove existing apple-touch-icon links and inject admin-specific ones
+    document.querySelectorAll<HTMLLinkElement>("link[rel='apple-touch-icon']").forEach(el => el.remove());
+    const adminIcon192 = document.createElement('link');
+    adminIcon192.rel = 'apple-touch-icon';
+    adminIcon192.setAttribute('sizes', '192x192');
+    adminIcon192.href = '/icon-admin-192.png?v=4';
+    document.head.appendChild(adminIcon192);
+    const adminIcon512 = document.createElement('link');
+    adminIcon512.rel = 'apple-touch-icon';
+    adminIcon512.setAttribute('sizes', '512x512');
+    adminIcon512.href = '/icon-admin-512.png?v=4';
+    document.head.appendChild(adminIcon512);
     return () => {
       if (manifest) manifest.href = prevManifest;
-      if (appleIcon) appleIcon.href = prevIcon;
+      adminIcon192.remove();
+      adminIcon512.remove();
     };
   }, []);
 
