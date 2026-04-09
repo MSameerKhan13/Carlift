@@ -177,9 +177,16 @@ async function buildInvoicePDF(
   const logoBase64 = await loadLogoBase64();
 
   // Try to load car image for embedding
-  const carImgBase64 = (b.assignedCar && carImages[b.assignedCar] && carImages[b.assignedCar].startsWith('http'))
-    ? await loadImageBase64FromUrl(carImages[b.assignedCar])
-    : '';
+  // Handles: (1) base64 data: URL directly, (2) https Firebase Storage URL via canvas conversion
+  let carImgBase64 = '';
+  const rawCarImg = b.assignedCar ? carImages[b.assignedCar] : '';
+  if (rawCarImg) {
+    if (rawCarImg.startsWith('data:')) {
+      carImgBase64 = rawCarImg;
+    } else if (rawCarImg.startsWith('http')) {
+      carImgBase64 = await loadImageBase64FromUrl(rawCarImg);
+    }
+  }
 
   // Booking date formatted in PKT
   const bookingDatePKT = b.createdAt
@@ -315,24 +322,32 @@ async function buildInvoicePDF(
 
     if (carImgBase64) {
       try {
-        doc.addImage(carImgBase64, 'JPEG', pageW - 20 - 44, ry + 2, 44, CAR_IMG_H - 4);
+        const fmt = carImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        doc.addImage(carImgBase64, fmt, pageW - 20 - 44, ry + 2, 44, CAR_IMG_H - 4);
       } catch {
-        doc.setTextColor(100, 150, 255);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, {
-          url: carImages[b.assignedCar] || '',
-          align: "right"
-        });
+        // Image embed failed — fall back to clickable link if we have a URL
+        if (rawCarImg && rawCarImg.startsWith('http')) {
+          doc.setTextColor(100, 150, 255);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, { url: rawCarImg, align: "right" });
+        } else {
+          doc.setTextColor(155, 155, 155);
+          doc.setFontSize(9);
+          doc.text("Image embed failed", pageW - 20, ry + CAR_IMG_H / 2 + 3, { align: "right" });
+        }
       }
-    } else if (carImages[b.assignedCar] && carImages[b.assignedCar].startsWith('http')) {
+    } else if (rawCarImg && rawCarImg.startsWith('http')) {
+      // Image URL exists but couldn't be converted (CORS) — show as clickable link
       doc.setTextColor(100, 150, 255);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
-      doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, {
-        url: carImages[b.assignedCar],
-        align: "right"
-      });
+      doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, { url: rawCarImg, align: "right" });
+    } else if (rawCarImg) {
+      // Has some value but not a recognized format
+      doc.setTextColor(155, 155, 155);
+      doc.setFontSize(9);
+      doc.text("Image unavailable", pageW - 20, ry + CAR_IMG_H / 2 + 3, { align: "right" });
     } else {
       doc.setTextColor(155, 155, 155);
       doc.setFontSize(9);
@@ -341,43 +356,64 @@ async function buildInvoicePDF(
     ry += CAR_IMG_H;
   }
 
-  // ── Fare box ──────────────────────────────────────────────────────────────
-  ry += 5;
+  // ── Fare box (full-width) ─────────────────────────────────────────────────
+  ry += 6;
+  doc.setFillColor(180, 0, 0);
+  doc.roundedRect(14, ry, pageW - 28, 26, 3, 3, 'F');
+  // Inner darker overlay for depth
   doc.setFillColor(200, 0, 0);
-  doc.roundedRect(pageW / 2, ry, pageW / 2 - 14, 22, 3, 3, 'F');
+  doc.roundedRect(14, ry, pageW - 28, 13, 3, 3, 'F');
+  doc.setFillColor(180, 0, 0);
+  doc.rect(14, ry + 10, pageW - 28, 3, 'F');
+
   doc.setTextColor(255, 200, 200);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text("MONTHLY FARE", pageW / 2 + 6, ry + 8);
-  doc.setFontSize(13);
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "bold");
+  doc.text("MONTHLY FARE", 22, ry + 9);
+  // Right-align booking status
+  const statusLabel = b.status === 'approved' ? '✓ CONFIRMED' : '⏳ AWAITING CONFIRMATION';
+  doc.setTextColor(255, 230, 200);
+  doc.setFontSize(8);
+  doc.text(statusLabel, pageW - 20, ry + 9, { align: "right" });
+
+  doc.setFontSize(15);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(255, 255, 255);
-  const fareText = b.fare.length > 32 ? b.fare.substring(0, 32) + '…' : b.fare;
-  doc.text(fareText, pageW - 20, ry + 17, { align: "right" });
+  const fareText = b.fare.length > 42 ? b.fare.substring(0, 42) + '…' : b.fare;
+  doc.text(fareText, pageW / 2, ry + 21, { align: "center" });
 
-  // ── Note ─────────────────────────────────────────────────────────────────
-  ry += 28;
-  doc.setFillColor(16, 16, 16);
-  doc.roundedRect(14, ry, pageW - 28, 13, 2, 2, 'F');
-  doc.setTextColor(145, 145, 145);
-  doc.setFontSize(8);
+  // ── Thank you + note strip ────────────────────────────────────────────────
+  ry += 32;
+  doc.setFillColor(12, 12, 12);
+  doc.roundedRect(14, ry, pageW - 28, 18, 2, 2, 'F');
+  doc.setFillColor(200, 0, 0);
+  doc.rect(14, ry, 3, 18, 'F');
+
+  doc.setTextColor(220, 80, 80);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("Thank you for choosing " + (companyInfo.name || 'Car Lift') + "!", 22, ry + 7.5);
+  doc.setTextColor(130, 130, 130);
+  doc.setFontSize(7.5);
   doc.setFont("helvetica", "italic");
-  doc.text("System-generated invoice. Send payment via the selected method before start date.", 20, ry + 8.5);
+  doc.text("System-generated invoice. Please send payment via the selected method before your start date.", 22, ry + 14);
 
   // ── Footer ────────────────────────────────────────────────────────────────
-  const footerY = pageH - 26;
-  doc.setFillColor(8, 8, 8);
-  doc.rect(0, footerY, pageW, 26, 'F');
+  const footerY = pageH - 28;
+  doc.setFillColor(6, 6, 6);
+  doc.rect(0, footerY, pageW, 28, 'F');
   doc.setFillColor(200, 0, 0);
-  doc.rect(0, footerY, pageW, 2, 'F');
-  doc.setTextColor(110, 110, 110);
+  doc.rect(0, footerY, pageW, 2.5, 'F');
+
+  doc.setTextColor(100, 100, 100);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
-  doc.text(companyInfo.name.toUpperCase() + " — CONTACT", pageW / 2, footerY + 9, { align: "center" });
+  doc.text(companyInfo.name.toUpperCase() + " — CONTACT", pageW / 2, footerY + 10, { align: "center" });
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(130, 130, 130);
-  doc.text(`Call: ${companyInfo.phone}  |  Email: ${companyInfo.email}`, pageW / 2, footerY + 15, { align: "center" });
-  doc.text(companyInfo.address + (companyInfo.address2 ? '  |  ' + companyInfo.address2 : ''), pageW / 2, footerY + 21, { align: "center" });
+  doc.setTextColor(120, 120, 120);
+  doc.text(`Call: ${companyInfo.phone}  |  Email: ${companyInfo.email}`, pageW / 2, footerY + 17, { align: "center" });
+  doc.setFontSize(7);
+  doc.text(companyInfo.address + (companyInfo.address2 ? '  |  ' + companyInfo.address2 : ''), pageW / 2, footerY + 23, { align: "center" });
 
   return doc;
 }
