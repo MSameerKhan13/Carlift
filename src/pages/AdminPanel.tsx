@@ -199,78 +199,120 @@ async function buildInvoicePDF(
 
   const invNum = invoiceNum || `INV-${b.id}`;
 
+  // ── Outer page border ─────────────────────────────────────────────────────
+  doc.setDrawColor(200, 0, 0);
+  doc.setLineWidth(0.5);
+  doc.rect(4, 4, pageW - 8, pageH - 8);
+
   // ── Header ────────────────────────────────────────────────────────────────
   doc.setFillColor(8, 8, 8);
-  doc.rect(0, 0, pageW, 46, 'F');
+  doc.rect(0, 0, pageW, 50, 'F');
   doc.setFillColor(200, 0, 0);
-  doc.rect(0, 46, pageW, 2.5, 'F');
+  doc.rect(0, 50, pageW, 3, 'F');
 
   if (logoBase64) {
-    try { doc.addImage(logoBase64, 'PNG', 12, 5, 38, 33); } catch { /* skip */ }
+    try { doc.addImage(logoBase64, 'PNG', 12, 6, 40, 35); } catch { /* skip */ }
   }
 
-  // Company info
+  // Company info (left side)
   doc.setTextColor(210, 210, 210);
-  doc.setFontSize(9.5);
-  doc.setFont("helvetica", "bold");
-  doc.text(companyInfo.tagline || 'Premium Monthly Car Service', 56, 13);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(200, 0, 0);
-  doc.setFontSize(8.5);
-  doc.text(`Call: ${companyInfo.phone}`, 56, 21);
-  doc.text(`Email: ${companyInfo.email}`, 56, 28);
-  doc.setTextColor(155, 155, 155);
-  doc.setFontSize(7.5);
-  doc.text(companyInfo.address, 56, 35);
-  if (companyInfo.address2) doc.text(companyInfo.address2, 56, 41);
-
-  // INVOICE title
-  doc.setTextColor(200, 0, 0);
-  doc.setFontSize(26);
-  doc.setFont("helvetica", "bold");
-  doc.text("INVOICE", pageW - 14, 20, { align: "right" });
-  doc.setTextColor(175, 175, 175);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text(`#${invNum}`, pageW - 14, 29, { align: "right" });
-  doc.text(new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }), pageW - 14, 37, { align: "right" });
-
-  // ── Billed To ─────────────────────────────────────────────────────────────
-  const billY = 55;
-  doc.setFillColor(16, 16, 16);
-  doc.roundedRect(14, billY, (pageW - 28) * 0.56, 34, 3, 3, 'F');
-  doc.setFillColor(200, 0, 0);
-  doc.rect(14, billY, 3.5, 34, 'F');
-  doc.setTextColor(200, 0, 0);
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "bold");
-  doc.text("BILLED TO", 22, billY + 9);
-  doc.setTextColor(240, 240, 240);
-  doc.setFontSize(13);
-  doc.text(b.name, 22, billY + 19);
-  doc.setTextColor(165, 165, 165);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text(`WhatsApp: ${b.whatsapp}`, 22, billY + 27);
-  doc.text(`Start Date: ${b.startDate}`, 22, billY + 33);
-
-  // Status badge
-  const badgeX = pageW - 14 - 54;
-  const isApproved = b.status === 'approved';
-  doc.setFillColor(isApproved ? 0 : 180, isApproved ? 140 : 80, isApproved ? 0 : 0);
-  doc.roundedRect(badgeX, billY + 6, 54, 17, 3, 3, 'F');
-  doc.setTextColor(255, 255, 255);
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(isApproved ? 'APPROVED' : 'PENDING', badgeX + 27, billY + 17, { align: "center" });
+  doc.text(companyInfo.name || 'Car Lift', 58, 14);
+  doc.setTextColor(200, 0, 0);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text(companyInfo.tagline || 'Premium Monthly Car Service', 58, 20);
+  doc.setTextColor(180, 180, 180);
+  doc.setFontSize(8);
+  doc.text(`Call: ${companyInfo.phone}`, 58, 28);
+  doc.text(`Email: ${companyInfo.email}`, 58, 34);
+  doc.setTextColor(130, 130, 130);
+  doc.setFontSize(7.5);
+  doc.text(companyInfo.address, 58, 41);
+  if (companyInfo.address2) doc.text(companyInfo.address2, 58, 46);
+
+  // INVOICE title (right side)
+  doc.setTextColor(200, 0, 0);
+  doc.setFontSize(30);
+  doc.setFont("helvetica", "bold");
+  doc.text("INVOICE", pageW - 14, 22, { align: "right" });
+  // Invoice number box
+  doc.setFillColor(28, 8, 8);
+  doc.roundedRect(pageW - 64, 26, 50, 18, 2, 2, 'F');
+  doc.setDrawColor(200, 0, 0);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(pageW - 64, 26, 50, 18, 2, 2, 'S');
+  doc.setTextColor(155, 155, 155);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.text("INVOICE NO.", pageW - 39, 31.5, { align: "center" });
+  doc.setTextColor(220, 220, 220);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text(`${invNum}`, pageW - 39, 39, { align: "center" });
+
+  // Date
+  doc.setTextColor(155, 155, 155);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text(new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }), pageW - 14, 50, { align: "right" });
+
+  // ── Billed To ─────────────────────────────────────────────────────────────
+  const billY = 60;
+  const billBoxW = (pageW - 28) * 0.58;
+  doc.setFillColor(14, 14, 14);
+  doc.roundedRect(14, billY, billBoxW, 38, 3, 3, 'F');
+  doc.setDrawColor(60, 60, 60);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(14, billY, billBoxW, 38, 3, 3, 'S');
+  doc.setFillColor(200, 0, 0);
+  doc.rect(14, billY, 4, 38, 'F');
+  doc.setTextColor(200, 0, 0);
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "bold");
+  doc.text("BILLED TO", 23, billY + 9);
+  doc.setTextColor(245, 245, 245);
+  doc.setFontSize(14);
+  doc.text(b.name, 23, billY + 20);
+  doc.setTextColor(155, 155, 155);
+  doc.setFontSize(8.5);
+  doc.setFont("helvetica", "normal");
+  doc.text(`WhatsApp: ${b.whatsapp}`, 23, billY + 29);
+  doc.text(`Start Date: ${b.startDate}`, 23, billY + 36);
+
+  // Status badge (right of billed-to)
+  const isApproved = b.status === 'approved';
+  const badgeX = 14 + billBoxW + 6;
+  const badgeW = pageW - 14 - badgeX;
+  doc.setFillColor(isApproved ? 0 : 160, isApproved ? 120 : 60, 0);
+  doc.roundedRect(badgeX, billY, badgeW, 38, 3, 3, 'F');
+  doc.setDrawColor(isApproved ? 0 : 200, isApproved ? 160 : 80, 0);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(badgeX, billY, badgeW, 38, 3, 3, 'S');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.text("STATUS", badgeX + badgeW / 2, billY + 12, { align: "center" });
+  doc.setFontSize(12);
+  doc.text(isApproved ? 'APPROVED' : 'PENDING', badgeX + badgeW / 2, billY + 24, { align: "center" });
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(isApproved ? 180 : 220, isApproved ? 255 : 180, isApproved ? 180 : 100);
+  doc.text(isApproved ? '✓ Confirmed' : '⏳ Awaiting', badgeX + badgeW / 2, billY + 33, { align: "center" });
 
   // ── Table ─────────────────────────────────────────────────────────────────
   const ROW_H = 13;
-  const tableY = billY + 42;
+  const tableY = billY + 46;
   doc.setFillColor(200, 0, 0);
   doc.rect(14, tableY, pageW - 28, 12, 'F');
+  // Subtle shine effect on header
+  doc.setFillColor(220, 20, 20);
+  doc.rect(14, tableY, pageW - 28, 5, 'F');
+  doc.setFillColor(200, 0, 0);
+  doc.rect(14, tableY + 5, pageW - 28, 7, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setFont("helvetica", "bold");
   doc.text("DESCRIPTION", 20, tableY + 8.5);
   doc.text("DETAILS", pageW - 20, tableY + 8.5, { align: "right" });
@@ -309,8 +351,10 @@ async function buildInvoicePDF(
 
   // ── Car image row ─────────────────────────────────────────────────────────
   if (b.assignedCar) {
-    const CAR_IMG_H = 28;
-    doc.setFillColor(18, 6, 6);
+    const CAR_IMG_H = carImgBase64 ? 34 : 16;
+    // Alternate row background
+    const imgRowBg = rows.length % 2 === 0 ? 22 : 14;
+    doc.setFillColor(imgRowBg, imgRowBg, imgRowBg);
     doc.rect(14, ry, pageW - 28, CAR_IMG_H, 'F');
     doc.setFillColor(200, 0, 0);
     doc.rect(14, ry, 2.5, CAR_IMG_H, 'F');
@@ -318,102 +362,106 @@ async function buildInvoicePDF(
     doc.setTextColor(190, 190, 190);
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text("Assigned Car Photo", 21, ry + 8);
+    doc.text("Assigned Car Photo", 21, ry + (carImgBase64 ? 10 : CAR_IMG_H * 0.65));
 
     if (carImgBase64) {
       try {
         const fmt = carImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-        doc.addImage(carImgBase64, fmt, pageW - 20 - 44, ry + 2, 44, CAR_IMG_H - 4);
+        doc.addImage(carImgBase64, fmt, pageW - 20 - 56, ry + 2, 56, CAR_IMG_H - 4);
       } catch {
-        // Image embed failed — fall back to clickable link if we have a URL
         if (rawCarImg && rawCarImg.startsWith('http')) {
-          doc.setTextColor(100, 150, 255);
+          doc.setTextColor(100, 160, 255);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(9);
-          doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, { url: rawCarImg, align: "right" });
-        } else {
-          doc.setTextColor(155, 155, 155);
-          doc.setFontSize(9);
-          doc.text("Image embed failed", pageW - 20, ry + CAR_IMG_H / 2 + 3, { align: "right" });
+          doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
         }
       }
     } else if (rawCarImg && rawCarImg.startsWith('http')) {
-      // Image URL exists but couldn't be converted (CORS) — show as clickable link
-      doc.setTextColor(100, 150, 255);
+      // Image URL exists — show as prominent clickable link
+      doc.setTextColor(100, 160, 255);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, { url: rawCarImg, align: "right" });
-    } else if (rawCarImg) {
-      // Has some value but not a recognized format
-      doc.setTextColor(155, 155, 155);
-      doc.setFontSize(9);
-      doc.text("Image unavailable", pageW - 20, ry + CAR_IMG_H / 2 + 3, { align: "right" });
+      doc.setFontSize(9.5);
+      doc.textWithLink("View Car Photo →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
     } else {
-      doc.setTextColor(155, 155, 155);
-      doc.setFontSize(9);
-      doc.text("No image uploaded", pageW - 20, ry + CAR_IMG_H / 2 + 3, { align: "right" });
+      // Truly no image on file
+      doc.setTextColor(120, 120, 120);
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "italic");
+      doc.text("Photo not uploaded", pageW - 20, ry + CAR_IMG_H * 0.65, { align: "right" });
     }
     ry += CAR_IMG_H;
   }
 
   // ── Fare box (full-width) ─────────────────────────────────────────────────
-  ry += 6;
-  doc.setFillColor(180, 0, 0);
-  doc.roundedRect(14, ry, pageW - 28, 26, 3, 3, 'F');
-  // Inner darker overlay for depth
+  ry += 8;
+  // Shadow layer
+  doc.setFillColor(100, 0, 0);
+  doc.roundedRect(16, ry + 2, pageW - 28, 30, 3, 3, 'F');
+  // Main fare box
+  doc.setFillColor(160, 0, 0);
+  doc.roundedRect(14, ry, pageW - 28, 30, 3, 3, 'F');
   doc.setFillColor(200, 0, 0);
-  doc.roundedRect(14, ry, pageW - 28, 13, 3, 3, 'F');
-  doc.setFillColor(180, 0, 0);
-  doc.rect(14, ry + 10, pageW - 28, 3, 'F');
+  doc.roundedRect(14, ry, pageW - 28, 15, 3, 3, 'F');
+  doc.setFillColor(160, 0, 0);
+  doc.rect(14, ry + 12, pageW - 28, 3, 'F');
 
-  doc.setTextColor(255, 200, 200);
-  doc.setFontSize(8.5);
-  doc.setFont("helvetica", "bold");
-  doc.text("MONTHLY FARE", 22, ry + 9);
-  // Right-align booking status
-  const statusLabel = b.status === 'approved' ? '✓ CONFIRMED' : '⏳ AWAITING CONFIRMATION';
-  doc.setTextColor(255, 230, 200);
+  doc.setTextColor(255, 210, 210);
   doc.setFontSize(8);
-  doc.text(statusLabel, pageW - 20, ry + 9, { align: "right" });
+  doc.setFont("helvetica", "bold");
+  doc.text("TOTAL MONTHLY FARE", 22, ry + 10);
+  doc.setTextColor(255, 240, 210);
+  doc.setFontSize(7.5);
+  const statusLabel = b.status === 'approved' ? '✓ CONFIRMED' : '⏳ PENDING APPROVAL';
+  doc.text(statusLabel, pageW - 20, ry + 10, { align: "right" });
 
-  doc.setFontSize(15);
+  doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(255, 255, 255);
   const fareText = b.fare.length > 42 ? b.fare.substring(0, 42) + '…' : b.fare;
-  doc.text(fareText, pageW / 2, ry + 21, { align: "center" });
+  doc.text(fareText, pageW / 2, ry + 24, { align: "center" });
 
-  // ── Thank you + note strip ────────────────────────────────────────────────
-  ry += 32;
-  doc.setFillColor(12, 12, 12);
-  doc.roundedRect(14, ry, pageW - 28, 18, 2, 2, 'F');
+  // ── Payment notice strip ──────────────────────────────────────────────────
+  ry += 38;
+  doc.setFillColor(10, 10, 10);
+  doc.roundedRect(14, ry, pageW - 28, 22, 2, 2, 'F');
+  doc.setDrawColor(50, 50, 50);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(14, ry, pageW - 28, 22, 2, 2, 'S');
   doc.setFillColor(200, 0, 0);
-  doc.rect(14, ry, 3, 18, 'F');
+  doc.rect(14, ry, 4, 22, 'F');
 
-  doc.setTextColor(220, 80, 80);
-  doc.setFontSize(9);
+  doc.setTextColor(200, 80, 80);
+  doc.setFontSize(8.5);
   doc.setFont("helvetica", "bold");
-  doc.text("Thank you for choosing " + (companyInfo.name || 'Car Lift') + "!", 22, ry + 7.5);
-  doc.setTextColor(130, 130, 130);
+  doc.text("Thank you for choosing " + (companyInfo.name || 'Car Lift') + "!", 23, ry + 9);
+  doc.setTextColor(110, 110, 110);
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "italic");
-  doc.text("System-generated invoice. Please send payment via the selected method before your start date.", 22, ry + 14);
+  doc.text("System-generated invoice. Send payment via the selected method before start date.", 23, ry + 17);
 
   // ── Footer ────────────────────────────────────────────────────────────────
-  const footerY = pageH - 28;
+  const footerY = pageH - 30;
   doc.setFillColor(6, 6, 6);
-  doc.rect(0, footerY, pageW, 28, 'F');
+  doc.rect(0, footerY, pageW, 30, 'F');
   doc.setFillColor(200, 0, 0);
-  doc.rect(0, footerY, pageW, 2.5, 'F');
+  doc.rect(0, footerY, pageW, 3, 'F');
 
-  doc.setTextColor(100, 100, 100);
-  doc.setFontSize(8);
+  // Footer center divider line
+  doc.setDrawColor(40, 40, 40);
+  doc.setLineWidth(0.3);
+  doc.line(14, footerY + 18, pageW - 14, footerY + 18);
+
+  doc.setTextColor(150, 0, 0);
+  doc.setFontSize(8.5);
   doc.setFont("helvetica", "bold");
-  doc.text(companyInfo.name.toUpperCase() + " — CONTACT", pageW / 2, footerY + 10, { align: "center" });
+  doc.text(companyInfo.name.toUpperCase() + " — CONTACT", pageW / 2, footerY + 11, { align: "center" });
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(120, 120, 120);
-  doc.text(`Call: ${companyInfo.phone}  |  Email: ${companyInfo.email}`, pageW / 2, footerY + 17, { align: "center" });
-  doc.setFontSize(7);
-  doc.text(companyInfo.address + (companyInfo.address2 ? '  |  ' + companyInfo.address2 : ''), pageW / 2, footerY + 23, { align: "center" });
+  doc.setTextColor(110, 110, 110);
+  doc.setFontSize(7.5);
+  doc.text(`Call: ${companyInfo.phone}  |  Email: ${companyInfo.email}`, pageW / 2, footerY + 22, { align: "center" });
+  doc.setFontSize(6.5);
+  doc.setTextColor(80, 80, 80);
+  doc.text(companyInfo.address + (companyInfo.address2 ? '  |  ' + companyInfo.address2 : ''), pageW / 2, footerY + 28, { align: "center" });
 
   return doc;
 }
@@ -425,13 +473,18 @@ function getInvoiceFileName(b: Booking) {
 }
 
 async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo, invoiceNum?: string) {
-  const doc = await buildInvoicePDF(b, carImages, companyInfo, invoiceNum);
+  // Always fetch freshest car images from Firestore to ensure car photo is included
+  const freshImages = await getCarImagesFromFirestore().catch(() => ({}));
+  const mergedImages = { ...carImages, ...freshImages };
+  const doc = await buildInvoicePDF(b, mergedImages, companyInfo, invoiceNum);
   doc.save(getInvoiceFileName(b));
 }
 
 // ── Share Invoice PDF via WhatsApp ────────────────────────────────────────────
 async function shareInvoicePDFWhatsApp(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo, invoiceNum?: string) {
-  const doc = await buildInvoicePDF(b, carImages, companyInfo, invoiceNum);
+  const freshImages = await getCarImagesFromFirestore().catch(() => ({}));
+  const mergedImages = { ...carImages, ...freshImages };
+  const doc = await buildInvoicePDF(b, mergedImages, companyInfo, invoiceNum);
   const fileName = getInvoiceFileName(b);
 
   const waMsg = encodeURIComponent(
