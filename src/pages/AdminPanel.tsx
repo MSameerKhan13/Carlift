@@ -11,7 +11,7 @@ import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
   onAuthStateChanged, signOut, updateProfile, type User as FBUser
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, ADMIN_EMAILS } from "@/lib/firebase";
 import carLiftLogo from "@/assets/carlift-logo-new.png";
 import {
   getBookings, saveBookings, getPickupLocations, getDropoffMapping,
@@ -653,7 +653,23 @@ const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
     setError(''); setSuccess('');
     setLoading(true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const trimmedEmail = email.trim().toLowerCase();
+      const cred = await signInWithEmailAndPassword(auth, trimmedEmail, password);
+
+      // If email is in the whitelist, ensure the Firestore role is set to admin
+      const isWhitelisted = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(trimmedEmail);
+      if (isWhitelisted) {
+        await saveUserToFirestore(cred.user.uid, {
+          name: cred.user.displayName || trimmedEmail.split('@')[0],
+          email: trimmedEmail,
+          phone: '',
+          role: 'admin',
+        });
+        onLogin();
+        setLoading(false);
+        return;
+      }
+
       const isAdmin = await isAdminInFirestore(cred.user.uid);
       if (!isAdmin) {
         await signOut(auth);
@@ -879,11 +895,13 @@ const AdminPanel = () => {
   // Force re-check key — used after registration when Firestore write completes
   const [forceRecheckKey, setForceRecheckKey] = useState(0);
 
-  // Auth state listener — role-based check via Firestore
+  // Auth state listener — role-based check via Firestore + email whitelist
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        const isAdmin = await isAdminInFirestore(user.uid);
+        const emailLower = (user.email || '').toLowerCase();
+        const isWhitelisted = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(emailLower);
+        const isAdmin = isWhitelisted || await isAdminInFirestore(user.uid);
         if (isAdmin) {
           setAdminUser(user);
         } else {
@@ -902,6 +920,9 @@ const AdminPanel = () => {
     if (forceRecheckKey === 0) return;
     const user = auth.currentUser;
     if (!user) { setAuthChecked(true); return; }
+    const emailLower = (user.email || '').toLowerCase();
+    const isWhitelisted = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(emailLower);
+    if (isWhitelisted) { setAdminUser(user); setAuthChecked(true); return; }
     isAdminInFirestore(user.uid).then(isAdmin => {
       if (isAdmin) setAdminUser(user);
       setAuthChecked(true);

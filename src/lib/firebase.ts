@@ -18,7 +18,9 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-export const ADMIN_EMAILS: string[] = [];
+export const ADMIN_EMAILS: string[] = [
+  'm.sameerkhanmughal@gmail.com',
+];
 
 setPersistence(auth, browserSessionPersistence).catch(() => {});
 
