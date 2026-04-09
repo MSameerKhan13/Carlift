@@ -14,7 +14,14 @@ export interface Booking {
   fare: string;
   status: 'pending' | 'approved';
   assignedCar: string;
+  assignedDriver?: string;
   createdAt: string;
+}
+
+export interface DriverInfo {
+  id: string;
+  name: string;
+  phone: string;
 }
 
 export interface Notification {

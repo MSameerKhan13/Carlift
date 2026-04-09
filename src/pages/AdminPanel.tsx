@@ -4,7 +4,7 @@ import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
   ImageIcon, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
-  ChevronRight, CalendarClock, Share2, Hash, Pencil
+  ChevronRight, CalendarClock, Share2, Hash, Pencil, UserRound, Menu
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import {
@@ -19,7 +19,8 @@ import {
   getDaysUntilDeadline, getCarImages, saveCarImages, parseFareAmount,
   getFarePerKmLocal, saveFarePerKmLocal,
   getWorkingDaysLocal, saveWorkingDaysLocal,
-  type CompanyInfo, getCompanyInfoLocal, saveCompanyInfoLocal
+  type CompanyInfo, getCompanyInfoLocal, saveCompanyInfoLocal,
+  type DriverInfo
 } from "@/lib/store";
 import {
   subscribeToBookings, updateBookingInFirestore, deleteBookingFromFirestore,
@@ -31,7 +32,10 @@ import {
   saveLocationsToFirestore, subscribeToLocations,
   saveCarsListToFirestore, subscribeToCarsListFromFirestore,
   saveCompanyInfoToFirestore, subscribeToCompanyInfo,
-  isAdminInFirestore, saveUserToFirestore
+  isAdminInFirestore, saveUserToFirestore,
+  uploadDriverImageToStorage, deleteDriverImageFromStorage,
+  saveDriversListToFirestore, subscribeToDriversList,
+  saveDriverImagesToFirestore, getDriverImagesFromFirestore
 } from "@/lib/firestoreStore";
 
 // Format date/time in Pakistan Standard Time (Karachi, UTC+5)
@@ -124,6 +128,14 @@ const FullImagePopup = ({ url, carName, onClose }: { url: string; carName: strin
   </div>
 );
 
+// ── Format Pakistani WhatsApp number ──────────────────────────────────────────
+function formatWANumber(num: string): string {
+  const clean = num.replace(/\D/g, '');
+  if (clean.startsWith('0') && clean.length === 11) return '92' + clean.slice(1);
+  if (clean.startsWith('92')) return clean;
+  return clean;
+}
+
 // ── PDF Logo Loader ──────────────────────────────────────────────────────────
 function loadLogoBase64(): Promise<string> {
   return new Promise((resolve) => {
@@ -168,7 +180,9 @@ async function buildInvoicePDF(
   b: Booking,
   carImages: Record<string, string>,
   companyInfo: CompanyInfo,
-  invoiceNum?: string
+  invoiceNum?: string,
+  driversList?: DriverInfo[],
+  driverImages?: Record<string, string>
 ) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
@@ -185,6 +199,18 @@ async function buildInvoicePDF(
       carImgBase64 = rawCarImg;
     } else if (rawCarImg.startsWith('http')) {
       carImgBase64 = await loadImageBase64FromUrl(rawCarImg);
+    }
+  }
+
+  // Try to load driver image for embedding
+  const assignedDriver = driversList?.find(d => d.id === b.assignedDriver);
+  let driverImgBase64 = '';
+  const rawDriverImg = assignedDriver && driverImages ? driverImages[assignedDriver.id] : '';
+  if (rawDriverImg) {
+    if (rawDriverImg.startsWith('data:')) {
+      driverImgBase64 = rawDriverImg;
+    } else if (rawDriverImg.startsWith('http')) {
+      driverImgBase64 = await loadImageBase64FromUrl(rawDriverImg);
     }
   }
 
@@ -392,6 +418,60 @@ async function buildInvoicePDF(
     ry += CAR_IMG_H;
   }
 
+  // ── Driver Info row ───────────────────────────────────────────────────────
+  if (assignedDriver) {
+    const DRIVER_IMG_H = driverImgBase64 ? 34 : 16;
+    const driverRowBg = (rows.length + (b.assignedCar ? 1 : 0)) % 2 === 0 ? 22 : 14;
+    doc.setFillColor(driverRowBg, driverRowBg, driverRowBg);
+    doc.rect(14, ry, pageW - 28, DRIVER_IMG_H, 'F');
+    doc.setFillColor(200, 0, 0);
+    doc.rect(14, ry, 2.5, DRIVER_IMG_H, 'F');
+
+    doc.setTextColor(190, 190, 190);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Assigned Driver", 21, ry + (driverImgBase64 ? 8 : DRIVER_IMG_H * 0.5));
+
+    if (driverImgBase64) {
+      try {
+        const fmt = driverImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+        doc.addImage(driverImgBase64, fmt, pageW - 20 - 36, ry + 2, 36, DRIVER_IMG_H - 4);
+      } catch {
+        if (rawDriverImg && rawDriverImg.startsWith('http')) {
+          doc.setTextColor(100, 160, 255);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.textWithLink("View Driver Photo →", pageW - 20, ry + DRIVER_IMG_H * 0.65, { url: rawDriverImg, align: "right" });
+        }
+      }
+    } else if (rawDriverImg && rawDriverImg.startsWith('http')) {
+      doc.setTextColor(100, 160, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.textWithLink("View Driver Photo →", pageW - 20, ry + DRIVER_IMG_H * 0.65, { url: rawDriverImg, align: "right" });
+    } else {
+      doc.setTextColor(120, 120, 120);
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "italic");
+      doc.text("Photo not uploaded", pageW - 20, ry + DRIVER_IMG_H * 0.65, { align: "right" });
+    }
+
+    // Second line — driver name + phone
+    const driverLabelY = ry + (driverImgBase64 ? 18 : DRIVER_IMG_H * 0.5);
+    doc.setTextColor(235, 235, 235);
+    doc.setFontSize(9.5);
+    doc.setFont("helvetica", "bold");
+    doc.text(assignedDriver.name, 21, driverLabelY);
+    if (assignedDriver.phone) {
+      doc.setTextColor(160, 160, 160);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.text(assignedDriver.phone, 21, driverLabelY + 6);
+    }
+
+    ry += DRIVER_IMG_H;
+  }
+
   // ── Fare box (full-width) ─────────────────────────────────────────────────
   ry += 8;
   // Shadow layer
@@ -472,32 +552,51 @@ function getInvoiceFileName(b: Booking) {
   return `CarLift_Invoice_${safeName}_${b.id}.pdf`;
 }
 
-async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo, invoiceNum?: string) {
-  // Always fetch freshest car images from Firestore to ensure car photo is included
-  const freshImages = await getCarImagesFromFirestore().catch(() => ({}));
-  const mergedImages = { ...carImages, ...freshImages };
-  const doc = await buildInvoicePDF(b, mergedImages, companyInfo, invoiceNum);
+async function generateInvoicePDF(
+  b: Booking,
+  carImages: Record<string, string>,
+  companyInfo: CompanyInfo,
+  invoiceNum?: string,
+  driversList?: DriverInfo[],
+  driverImages?: Record<string, string>
+) {
+  const freshCarImages = await getCarImagesFromFirestore().catch(() => ({}));
+  const mergedCarImages = { ...carImages, ...freshCarImages };
+  const freshDriverImages = await getDriverImagesFromFirestore().catch(() => ({}));
+  const mergedDriverImages = { ...(driverImages || {}), ...freshDriverImages };
+  const doc = await buildInvoicePDF(b, mergedCarImages, companyInfo, invoiceNum, driversList, mergedDriverImages);
   doc.save(getInvoiceFileName(b));
 }
 
 // ── Share Invoice PDF via WhatsApp ────────────────────────────────────────────
-async function shareInvoicePDFWhatsApp(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo, invoiceNum?: string) {
-  const freshImages = await getCarImagesFromFirestore().catch(() => ({}));
-  const mergedImages = { ...carImages, ...freshImages };
-  const doc = await buildInvoicePDF(b, mergedImages, companyInfo, invoiceNum);
+async function shareInvoicePDFWhatsApp(
+  b: Booking,
+  carImages: Record<string, string>,
+  companyInfo: CompanyInfo,
+  invoiceNum?: string,
+  driversList?: DriverInfo[],
+  driverImages?: Record<string, string>
+) {
+  const freshCarImages = await getCarImagesFromFirestore().catch(() => ({}));
+  const mergedCarImages = { ...carImages, ...freshCarImages };
+  const freshDriverImages = await getDriverImagesFromFirestore().catch(() => ({}));
+  const mergedDriverImages = { ...(driverImages || {}), ...freshDriverImages };
+  const doc = await buildInvoicePDF(b, mergedCarImages, companyInfo, invoiceNum, driversList, mergedDriverImages);
   const fileName = getInvoiceFileName(b);
 
+  const waNum = formatWANumber(b.whatsapp);
+  const rentalNum = companyInfo.phone ? `\nFor queries: ${companyInfo.phone}` : '';
   const waMsg = encodeURIComponent(
-    `Dear ${b.name},\n\nPlease find your Car Lift invoice attached.\n\nBooking #${b.id}\nRoute: ${b.pickup} → ${b.dropoff}\nFare: ${b.fare}\nStatus: ${b.status.toUpperCase()}\n\nThank you for choosing ${companyInfo.name || 'Car Lift'}!`
+    `Dear ${b.name},\n\nPlease find your Car Lift invoice details below.\n\nBooking #${b.id}\nRoute: ${b.pickup} → ${b.dropoff}\nFare: ${b.fare}\nStatus: ${b.status.toUpperCase()}\nStart Date: ${b.startDate}${rentalNum}\n\nThank you for choosing ${companyInfo.name || 'Car Lift'}!`
   );
-  const waUrl = `https://wa.me/${b.whatsapp}?text=${waMsg}`;
+  const waUrl = `https://wa.me/${waNum}?text=${waMsg}`;
 
   // Try native Web Share API (works on Android/iOS)
   try {
     const blob = doc.output('blob');
     const file = new File([blob], fileName, { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: `Invoice - ${b.name}` });
+      await navigator.share({ files: [file], title: `Invoice - ${b.name}`, text: `Car Lift invoice for ${b.name}` });
       return;
     }
   } catch {
@@ -729,6 +828,16 @@ const AdminPanel = () => {
   const [newCarName, setNewCarName] = useState('');
   const [addingCar, setAddingCar] = useState(false);
 
+  // Drivers state
+  const [driversList, setDriversList] = useState<DriverInfo[]>([]);
+  const [driverImages, setDriverImages] = useState<Record<string, string>>({});
+  const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPhone, setNewDriverPhone] = useState('');
+  const [addingDriver, setAddingDriver] = useState(false);
+  const [uploadingDriver, setUploadingDriver] = useState<string | null>(null);
+  const [viewDriverImage, setViewDriverImage] = useState<{ driverName: string; url: string } | null>(null);
+  const [driverPopup, setDriverPopup] = useState<number | null>(null);
+
   // Routes management state
   const [routes, setRoutes] = useState<RouteData[]>(ROUTES_DATA);
   const [newRouteTitle, setNewRouteTitle] = useState('');
@@ -924,6 +1033,21 @@ const AdminPanel = () => {
         setCarImages(imgs);
         saveCarImages(imgs);
       }
+    });
+  }, []);
+
+  // Subscribe to drivers list from Firestore
+  useEffect(() => {
+    const unsub = subscribeToDriversList(drivers => {
+      if (drivers.length >= 0) setDriversList(drivers);
+    });
+    return () => unsub();
+  }, []);
+
+  // Load driver images from Firestore
+  useEffect(() => {
+    getDriverImagesFromFirestore().then(imgs => {
+      if (Object.keys(imgs).length > 0) setDriverImages(imgs);
     });
   }, []);
 
@@ -1151,6 +1275,100 @@ const AdminPanel = () => {
     await updateBookingInFirestore(id, { assignedCar: car });
   };
 
+  // ── Driver Assignment ─────────────────────────────────────────────────────
+  const assignDriver = async (id: number, driverId: string) => {
+    const updated = bookings.map(b => b.id === id ? { ...b, assignedDriver: driverId } : b);
+    saveBookings(updated);
+    setBookings(updated);
+    setDriverPopup(null);
+    await updateBookingInFirestore(id, { assignedDriver: driverId });
+  };
+
+  const unassignDriver = async (id: number) => {
+    const updated = bookings.map(b => b.id === id ? { ...b, assignedDriver: '' } : b);
+    saveBookings(updated);
+    setBookings(updated);
+    setDriverPopup(null);
+    await updateBookingInFirestore(id, { assignedDriver: '' });
+  };
+
+  // ── Driver Management ─────────────────────────────────────────────────────
+  const handleAddDriver = async () => {
+    const name = newDriverName.trim();
+    if (!name) return;
+    setAddingDriver(true);
+    const newDriver: DriverInfo = { id: `drv_${Date.now()}`, name, phone: newDriverPhone.trim() };
+    const updated = [...driversList, newDriver];
+    setDriversList(updated);
+    await saveDriversListToFirestore(updated);
+    setNewDriverName('');
+    setNewDriverPhone('');
+    setAddingDriver(false);
+  };
+
+  const handleDeleteDriver = async (id: string) => {
+    const updated = driversList.filter(d => d.id !== id);
+    setDriversList(updated);
+    await saveDriversListToFirestore(updated);
+    if (driverImages[id]) {
+      const updatedImgs = { ...driverImages };
+      delete updatedImgs[id];
+      setDriverImages(updatedImgs);
+      await saveDriverImagesToFirestore(updatedImgs);
+      const driver = driversList.find(d => d.id === id);
+      if (driver) await deleteDriverImageFromStorage(driver.name).catch(() => {});
+    }
+  };
+
+  const compressAndSaveDriverImage = async (driver: DriverInfo, file: File) => {
+    setUploadingDriver(driver.id);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = reject;
+        reader.onload = (e) => {
+          const src = e.target?.result as string;
+          const img = new window.Image();
+          img.onerror = reject;
+          img.onload = () => {
+            const MAX = 800;
+            let w = img.width, h = img.height;
+            if (w > h) { if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; } }
+            else { if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; } }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', 0.82));
+          };
+          img.src = src;
+        };
+        reader.readAsDataURL(file);
+      });
+      let imageUrl = base64;
+      try {
+        imageUrl = await uploadDriverImageToStorage(driver.name, base64);
+      } catch {
+        imageUrl = base64;
+      }
+      const updated = { ...driverImages, [driver.id]: imageUrl };
+      setDriverImages(updated);
+      await saveDriverImagesToFirestore(updated);
+    } catch (err) {
+      console.error('Driver image upload error:', err);
+    } finally {
+      setUploadingDriver(null);
+    }
+  };
+
+  const handleRemoveDriverImage = async (driverId: string) => {
+    const updated = { ...driverImages };
+    delete updated[driverId];
+    setDriverImages(updated);
+    await saveDriverImagesToFirestore(updated);
+    const driver = driversList.find(d => d.id === driverId);
+    if (driver) await deleteDriverImageFromStorage(driver.name).catch(() => {});
+  };
+
   const deleteBooking = async (id: number) => {
     const updated = bookings.filter(b => b.id !== id);
     saveBookings(updated);
@@ -1158,18 +1376,11 @@ const AdminPanel = () => {
     await deleteBookingFromFirestore(id);
   };
 
-  // Format Pakistani number for wa.me (03001234567 → 923001234567)
-  const formatWANumber = (num: string) => {
-    const clean = num.replace(/\D/g, '');
-    if (clean.startsWith('0') && clean.length === 11) return '92' + clean.slice(1);
-    if (clean.startsWith('92')) return clean;
-    return clean;
-  };
-
   const sendWhatsApp = (b: Booking) => {
     const waNum = formatWANumber(b.whatsapp);
+    const rentalNum = companyInfo.phone ? `\nFor queries call: ${companyInfo.phone}` : '';
     const msg = encodeURIComponent(
-      `Dear ${b.name},\n\nYour Car Lift booking (${b.pickup} → ${b.dropoff}) is *${b.status.toUpperCase()}*.\nFare: ${b.fare}\nStart Date: ${b.startDate}\n\nThank you for choosing Car Lift!`
+      `Dear ${b.name},\n\nYour Car Lift booking (${b.pickup} → ${b.dropoff}) is *${b.status.toUpperCase()}*.\nFare: ${b.fare}\nStart Date: ${b.startDate}${rentalNum}\n\nThank you for choosing ${companyInfo.name || 'Car Lift'}!`
     );
     window.open(`https://wa.me/${waNum}?text=${msg}`, '_blank');
   };
@@ -1301,6 +1512,7 @@ const AdminPanel = () => {
 
   const activeBookingForCar = bookings.find(b => b.id === carPopup);
   const activeBookingForStatus = bookings.find(b => b.id === statusPopup);
+  const activeBookingForDriver = bookings.find(b => b.id === driverPopup);
 
   if (!authChecked) {
     return (
@@ -1321,9 +1533,14 @@ const AdminPanel = () => {
   return (
     <div className="min-h-screen bg-background">
 
-      {/* Full Image Popup */}
+      {/* Full Image Popup — Car */}
       {viewCarImage && (
         <FullImagePopup url={viewCarImage.url} carName={viewCarImage.car} onClose={() => setViewCarImage(null)} />
+      )}
+
+      {/* Full Image Popup — Driver */}
+      {viewDriverImage && (
+        <FullImagePopup url={viewDriverImage.url} carName={viewDriverImage.driverName} onClose={() => setViewDriverImage(null)} />
       )}
 
       {/* New Booking Alert */}
@@ -1379,99 +1596,103 @@ const AdminPanel = () => {
       )}
 
       {/* Header */}
-      <div className="bg-card border-b-2 border-primary px-4 md:px-8 py-5 flex flex-wrap justify-between items-center gap-4">
-        <div className="flex items-center gap-3">
-          <div className="bg-primary/20 border border-primary/50 p-2 rounded-xl">
-            <Crown className="w-6 h-6 text-primary" />
+      <div className="bg-card border-b-2 border-primary px-3 md:px-8 py-3 md:py-5">
+        <div className="flex justify-between items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="bg-primary/20 border border-primary/50 p-1.5 md:p-2 rounded-xl">
+              <Crown className="w-5 h-5 md:w-6 md:h-6 text-primary" />
+            </div>
+            <div>
+              <span className="font-display text-base md:text-lg font-bold text-primary uppercase tracking-wider">Admin Panel</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {isRealtime ? (
+                  <span className="flex items-center gap-1 text-[10px] text-green-400 font-semibold">
+                    <Wifi className="w-2.5 h-2.5" /> Live
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Polling</span>
+                )}
+              </div>
+            </div>
           </div>
-          <div>
-            <span className="font-display text-lg font-bold text-primary uppercase tracking-wider">Admin Panel</span>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              {isRealtime ? (
-                <span className="flex items-center gap-1 text-[10px] text-green-400 font-semibold">
-                  <Wifi className="w-2.5 h-2.5" /> Live
-                </span>
-              ) : (
-                <span className="text-[10px] text-muted-foreground">Polling</span>
+          <div className="flex items-center gap-2">
+            {/* Notification Bell */}
+            <div className="relative">
+              <button onClick={() => setShowNotifications(!showNotifications)}
+                className="relative bg-primary/15 border border-primary/50 p-2 md:p-2.5 rounded-xl hover:bg-primary/25 transition-all hover:scale-105">
+                <Bell className="w-4 h-4 md:w-5 md:h-5 text-primary" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+              {showNotifications && (
+                <div className="absolute right-0 top-full mt-2 w-72 md:w-96 bg-card border-2 border-primary rounded-2xl shadow-2xl z-[3000] animate-fade-in-up overflow-hidden">
+                  <div className="flex justify-between items-center px-4 py-3 border-b border-border">
+                    <h4 className="font-display font-bold text-primary text-base">Notifications</h4>
+                    {unreadCount > 0 && (
+                      <button onClick={handleMarkAllRead} className="text-xs text-primary hover:underline font-semibold">Mark all</button>
+                    )}
+                  </div>
+                  <div className="max-h-72 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground text-sm">No notifications yet</div>
+                    ) : (
+                      notifications.slice(0, 20).map(n => (
+                        <button key={n.id} onClick={() => handleMarkRead(n.id)}
+                          className={`w-full text-left px-4 py-3 border-b border-border/50 flex items-start gap-3 transition-colors hover:bg-primary/10 ${!n.read ? 'bg-primary/5' : ''}`}>
+                          <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${!n.read ? 'bg-primary' : 'bg-muted'}`} />
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm ${!n.read ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>{n.message}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {new Date(n.createdAt).toLocaleString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
               )}
             </div>
+            <button onClick={() => navigate('/')} className="bg-primary/20 border border-primary text-foreground px-2.5 md:px-4 py-1.5 md:py-2 rounded-lg font-semibold text-xs md:text-sm hover:bg-primary/30 hover:scale-105 transition-all flex items-center gap-1.5">
+              <ArrowLeft className="w-3.5 h-3.5 md:w-4 md:h-4" /> <span className="hidden sm:inline">Back</span>
+            </button>
+            <button onClick={handleAdminLogout} className="bg-destructive/20 border border-destructive/50 text-destructive px-2.5 md:px-4 py-1.5 md:py-2 rounded-lg font-semibold text-xs md:text-sm hover:bg-destructive/30 hover:scale-105 transition-all flex items-center gap-1.5">
+              <LogIn className="w-3.5 h-3.5 md:w-4 md:h-4 rotate-180" /> <span className="hidden sm:inline">Logout</span>
+            </button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 items-center">
-          {/* Notification Bell */}
-          <div className="relative">
-            <button onClick={() => setShowNotifications(!showNotifications)}
-              className="relative bg-primary/15 border border-primary/50 p-2.5 rounded-xl hover:bg-primary/25 transition-all hover:scale-105">
-              <Bell className="w-5 h-5 text-primary" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center animate-pulse">
-                  {unreadCount}
-                </span>
-              )}
-            </button>
-            {showNotifications && (
-              <div className="absolute right-0 top-full mt-2 w-80 md:w-96 bg-card border-2 border-primary rounded-2xl shadow-2xl z-[3000] animate-fade-in-up overflow-hidden">
-                <div className="flex justify-between items-center px-4 py-3 border-b border-border">
-                  <h4 className="font-display font-bold text-primary text-base">Notifications</h4>
-                  {unreadCount > 0 && (
-                    <button onClick={handleMarkAllRead} className="text-xs text-primary hover:underline font-semibold">Mark all as read</button>
-                  )}
-                </div>
-                <div className="max-h-80 overflow-y-auto">
-                  {notifications.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">No notifications yet</div>
-                  ) : (
-                    notifications.slice(0, 20).map(n => (
-                      <button key={n.id} onClick={() => handleMarkRead(n.id)}
-                        className={`w-full text-left px-4 py-3 border-b border-border/50 flex items-start gap-3 transition-colors hover:bg-primary/10 ${!n.read ? 'bg-primary/5' : ''}`}>
-                        <div className={`mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0 ${!n.read ? 'bg-primary' : 'bg-muted'}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm ${!n.read ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>{n.message}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {new Date(n.createdAt).toLocaleString('en-PK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Stats */}
-          <div className="glass-card px-3 py-2 text-center min-w-[70px] hover:scale-105 transition-transform">
-            <div className="text-xl font-bold text-primary">{bookings.length}</div>
-            <div className="text-[10px] text-muted-foreground uppercase">Total</div>
+        {/* Stats — scrollable on mobile */}
+        <div className="flex gap-2 mt-3 overflow-x-auto pb-1 scrollbar-hide -mx-1 px-1">
+          <div className="glass-card px-3 py-1.5 text-center min-w-[62px] flex-shrink-0 hover:scale-105 transition-transform">
+            <div className="text-lg font-bold text-primary">{bookings.length}</div>
+            <div className="text-[9px] text-muted-foreground uppercase">Total</div>
           </div>
-          <div className="glass-card px-3 py-2 text-center min-w-[70px] hover:scale-105 transition-transform">
-            <div className="text-xl font-bold text-orange-400">{pendingCount}</div>
-            <div className="text-[10px] text-muted-foreground uppercase">Pending</div>
+          <div className="glass-card px-3 py-1.5 text-center min-w-[62px] flex-shrink-0 hover:scale-105 transition-transform">
+            <div className="text-lg font-bold text-orange-400">{pendingCount}</div>
+            <div className="text-[9px] text-muted-foreground uppercase">Pending</div>
           </div>
-          <div className="glass-card px-3 py-2 text-center min-w-[70px] hover:scale-105 transition-transform">
-            <div className="text-xl font-bold text-green-400">{approvedCount}</div>
-            <div className="text-[10px] text-muted-foreground uppercase">Approved</div>
+          <div className="glass-card px-3 py-1.5 text-center min-w-[62px] flex-shrink-0 hover:scale-105 transition-transform">
+            <div className="text-lg font-bold text-green-400">{approvedCount}</div>
+            <div className="text-[9px] text-muted-foreground uppercase">Approved</div>
           </div>
-          <div className="glass-card px-3 py-2 text-center min-w-[70px] hover:scale-105 transition-transform border-green-500/30">
-            <div className="text-xl font-bold text-green-400">Rs {formatRevenue(collectedRevenue)}</div>
-            <div className="text-[10px] text-green-400/70 uppercase">Collected</div>
+          <div className="glass-card px-3 py-1.5 text-center min-w-[80px] flex-shrink-0 hover:scale-105 transition-transform border-green-500/30">
+            <div className="text-lg font-bold text-green-400">Rs {formatRevenue(collectedRevenue)}</div>
+            <div className="text-[9px] text-green-400/70 uppercase">Collected</div>
           </div>
-          <div className="glass-card px-3 py-2 text-center min-w-[70px] hover:scale-105 transition-transform border-orange-500/30">
-            <div className="text-xl font-bold text-orange-400">Rs {formatRevenue(pendingRevenue)}</div>
-            <div className="text-[10px] text-orange-400/70 uppercase">Pending</div>
+          <div className="glass-card px-3 py-1.5 text-center min-w-[80px] flex-shrink-0 hover:scale-105 transition-transform border-orange-500/30">
+            <div className="text-lg font-bold text-orange-400">Rs {formatRevenue(pendingRevenue)}</div>
+            <div className="text-[9px] text-orange-400/70 uppercase">Pending Rev.</div>
           </div>
           {urgentCount > 0 && (
-            <div className="glass-card px-3 py-2 text-center min-w-[70px] border-destructive hover:scale-105 transition-transform">
-              <div className="text-xl font-bold text-destructive">{urgentCount}</div>
-              <div className="text-[10px] text-destructive uppercase">Urgent</div>
+            <div className="glass-card px-3 py-1.5 text-center min-w-[62px] flex-shrink-0 border-destructive hover:scale-105 transition-transform">
+              <div className="text-lg font-bold text-destructive">{urgentCount}</div>
+              <div className="text-[9px] text-destructive uppercase">Urgent</div>
             </div>
           )}
-          <button onClick={() => navigate('/')} className="bg-primary/20 border border-primary text-foreground px-4 py-2 rounded-lg font-semibold text-sm hover:bg-primary/30 hover:scale-105 transition-all flex items-center gap-2">
-            <ArrowLeft className="w-4 h-4" /> Back
-          </button>
-          <button onClick={handleAdminLogout} className="bg-destructive/20 border border-destructive/50 text-destructive px-4 py-2 rounded-lg font-semibold text-sm hover:bg-destructive/30 hover:scale-105 transition-all flex items-center gap-2">
-            <LogIn className="w-4 h-4 rotate-180" /> Logout
-          </button>
         </div>
       </div>
 
@@ -1495,110 +1716,195 @@ const AdminPanel = () => {
 
         {/* ── BOOKINGS TAB ── */}
         {activeTab === 'bookings' && (
-          <div className="bg-card border border-border rounded-2xl p-5 overflow-hidden">
-            <h3 className="text-primary font-display font-bold text-lg mb-5 pb-3 border-b border-border flex items-center gap-2">
+          <div className="bg-card border border-border rounded-2xl p-3 md:p-5 overflow-hidden">
+            <h3 className="text-primary font-display font-bold text-lg mb-4 pb-3 border-b border-border flex items-center gap-2">
               <CalendarCheck className="w-5 h-5" /> Booking Requests
-              {isRealtime && <span className="ml-auto text-xs text-green-400 font-normal flex items-center gap-1"><Wifi className="w-3 h-3" /> Real-time</span>}
+              {isRealtime && <span className="ml-auto text-xs text-green-400 font-normal flex items-center gap-1"><Wifi className="w-3 h-3" /> Live</span>}
             </h3>
             {bookings.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">No bookings yet</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[800px]">
-                  <thead>
-                    <tr className="bg-primary/10">
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Customer</th>
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Route</th>
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Fare</th>
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Deadline</th>
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Status</th>
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Car</th>
-                      <th className="text-left p-3 text-primary text-sm font-semibold">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bookings.map(b => (
-                      <tr key={b.id} className="border-b border-border hover:bg-primary/5 transition-colors group">
-                        <td className="p-3">
-                          <div className="font-semibold text-sm">{b.name}</div>
-                          <div className="text-xs text-muted-foreground">{b.whatsapp}</div>
-                          {b.createdAt && (
-                            <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground/60">
-                              <CalendarClock className="w-2.5 h-2.5 text-primary/40" />
-                              {formatPKT(b.createdAt)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <div className="text-sm">{b.pickup} → {b.dropoff}</div>
-                          <div className="text-xs text-muted-foreground">{b.timing}</div>
-                        </td>
-                        <td className="p-3">
-                          <span className="text-sm font-semibold text-primary">{b.fare}</span>
-                        </td>
-                        <td className="p-3">
-                          <DeadlineBadge startDate={b.startDate} />
-                          <div className="text-[10px] text-muted-foreground mt-0.5">{b.startDate}</div>
-                        </td>
-                        <td className="p-3">
+              <>
+                {/* ── Mobile card view (< md) ── */}
+                <div className="md:hidden flex flex-col gap-3">
+                  {bookings.map(b => {
+                    const assignedDriverObj = b.assignedDriver ? driversList.find(d => d.id === b.assignedDriver) : null;
+                    return (
+                      <div key={b.id} className="bg-background border border-border rounded-xl p-3 flex flex-col gap-2.5">
+                        {/* Top row: name + status */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-sm">{b.name}</div>
+                            <div className="text-xs text-muted-foreground">{b.whatsapp}</div>
+                          </div>
                           <button onClick={() => setStatusPopup(b.id)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border cursor-pointer transition-all hover:scale-105 ${b.status === 'approved' ? 'bg-green-500/20 border-green-500 text-green-400 hover:bg-green-500/30' : 'bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30'}`}>
+                            className={`px-2.5 py-1 rounded-full text-xs font-semibold border flex-shrink-0 ${b.status === 'approved' ? 'bg-green-500/20 border-green-500 text-green-400' : 'bg-orange-500/20 border-orange-500 text-orange-400'}`}>
                             {b.status === 'approved' ? 'Approved' : 'Pending'}
                           </button>
-                        </td>
-                        <td className="p-3">
+                        </div>
+                        {/* Route + fare */}
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{b.pickup} → {b.dropoff}</span>
+                          <span className="font-bold text-primary">{b.fare.split('/')[0]}</span>
+                        </div>
+                        {/* Timing + deadline */}
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{b.timing}</span>
+                          <DeadlineBadge startDate={b.startDate} />
+                        </div>
+                        {/* Car + Driver assign */}
+                        <div className="flex gap-2">
                           <button onClick={() => setCarPopup(b.id)}
-                            className="px-3 py-1.5 bg-primary/15 border border-primary/50 rounded-lg text-xs font-medium hover:bg-primary/25 hover:scale-105 transition-all max-w-[180px] truncate">
+                            className="flex-1 py-1.5 px-2 bg-primary/10 border border-primary/30 rounded-lg text-xs font-medium flex items-center gap-1 truncate">
                             {b.assignedCar ? (
-                              <span className="flex items-center gap-1">
-                                {carImages[b.assignedCar] && (
-                                  <img src={carImages[b.assignedCar]} alt="" className="w-5 h-4 object-cover rounded" />
-                                )}
-                                <Car className="w-3 h-3 inline" />{b.assignedCar}
-                              </span>
-                            ) : <span className="text-orange-400">Select Car</span>}
+                              <>
+                                {carImages[b.assignedCar] && <img src={carImages[b.assignedCar]} alt="" className="w-4 h-3 object-cover rounded flex-shrink-0" />}
+                                <Car className="w-3 h-3 flex-shrink-0 text-primary" />
+                                <span className="truncate">{b.assignedCar.split(' ').slice(0, 3).join(' ')}</span>
+                              </>
+                            ) : <span className="text-orange-400 flex items-center gap-1"><Car className="w-3 h-3" /> Select Car</span>}
                           </button>
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-col gap-1.5">
-                            {editingInvoiceNum === b.id ? (
-                              <div className="flex items-center gap-1">
-                                <Hash className="w-3 h-3 text-primary flex-shrink-0" />
-                                <input
-                                  autoFocus
-                                  value={customInvoiceNums[b.id] ?? `INV-${b.id}`}
-                                  onChange={e => setCustomInvoiceNums(prev => ({ ...prev, [b.id]: e.target.value }))}
-                                  onBlur={() => setEditingInvoiceNum(null)}
-                                  onKeyDown={e => e.key === 'Enter' && setEditingInvoiceNum(null)}
-                                  className="w-28 px-1.5 py-1 bg-input border border-primary/60 rounded text-xs text-foreground focus:outline-none focus:border-primary"
-                                  placeholder={`INV-${b.id}`}
-                                />
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  if (!customInvoiceNums[b.id]) setCustomInvoiceNums(prev => ({ ...prev, [b.id]: `INV-${b.id}` }));
-                                  setEditingInvoiceNum(b.id);
-                                }}
-                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-                                title="Edit invoice number">
-                                <Pencil className="w-2.5 h-2.5" />
-                                <span className="font-mono">{customInvoiceNums[b.id] || `INV-${b.id}`}</span>
-                              </button>
-                            )}
-                            <div className="flex gap-1.5">
-                              <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id])} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
-                              <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id])} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice PDF via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
-                              <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
-                              <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
-                            </div>
-                          </div>
-                        </td>
+                          <button onClick={() => setDriverPopup(b.id)}
+                            className="flex-1 py-1.5 px-2 bg-primary/10 border border-primary/30 rounded-lg text-xs font-medium flex items-center gap-1 truncate">
+                            {assignedDriverObj ? (
+                              <>
+                                {driverImages[assignedDriverObj.id] && <img src={driverImages[assignedDriverObj.id]} alt="" className="w-4 h-4 object-cover rounded-full flex-shrink-0" />}
+                                <UserRound className="w-3 h-3 flex-shrink-0 text-primary" />
+                                <span className="truncate">{assignedDriverObj.name}</span>
+                              </>
+                            ) : <span className="text-orange-400 flex items-center gap-1"><UserRound className="w-3 h-3" /> Assign Driver</span>}
+                          </button>
+                        </div>
+                        {/* Invoice number */}
+                        <div className="flex items-center gap-1">
+                          {editingInvoiceNum === b.id ? (
+                            <input autoFocus value={customInvoiceNums[b.id] ?? `INV-${b.id}`}
+                              onChange={e => setCustomInvoiceNums(prev => ({ ...prev, [b.id]: e.target.value }))}
+                              onBlur={() => setEditingInvoiceNum(null)}
+                              onKeyDown={e => e.key === 'Enter' && setEditingInvoiceNum(null)}
+                              className="flex-1 px-2 py-1 bg-input border border-primary/60 rounded text-xs text-foreground focus:outline-none" />
+                          ) : (
+                            <button onClick={() => { if (!customInvoiceNums[b.id]) setCustomInvoiceNums(prev => ({ ...prev, [b.id]: `INV-${b.id}` })); setEditingInvoiceNum(b.id); }}
+                              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary">
+                              <Pencil className="w-2.5 h-2.5" /><span className="font-mono">{customInvoiceNums[b.id] || `INV-${b.id}`}</span>
+                            </button>
+                          )}
+                        </div>
+                        {/* Actions */}
+                        <div className="flex gap-1.5 pt-1 border-t border-border/50">
+                          <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="flex-1 bg-primary/20 hover:bg-primary/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Download Invoice"><FileText className="w-4 h-4" /></button>
+                          <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="flex-1 bg-green-600/20 hover:bg-green-600/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Share via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                          <button onClick={() => sendWhatsApp(b)} className="flex-1 bg-green-600/10 hover:bg-green-600/20 p-2 rounded-lg flex items-center justify-center transition-all" title="WhatsApp Message"><MessageCircle className="w-4 h-4 text-green-300" /></button>
+                          <button onClick={() => deleteBooking(b.id)} className="flex-1 bg-destructive/20 hover:bg-destructive/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Delete"><Trash2 className="w-4 h-4 text-destructive" /></button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* ── Desktop table view (>= md) ── */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full min-w-[900px]">
+                    <thead>
+                      <tr className="bg-primary/10">
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Customer</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Route</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Fare</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Deadline</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Status</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Car</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Driver</th>
+                        <th className="text-left p-3 text-primary text-sm font-semibold">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {bookings.map(b => {
+                        const assignedDriverObj = b.assignedDriver ? driversList.find(d => d.id === b.assignedDriver) : null;
+                        return (
+                          <tr key={b.id} className="border-b border-border hover:bg-primary/5 transition-colors group">
+                            <td className="p-3">
+                              <div className="font-semibold text-sm">{b.name}</div>
+                              <div className="text-xs text-muted-foreground">{b.whatsapp}</div>
+                              {b.createdAt && (
+                                <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground/60">
+                                  <CalendarClock className="w-2.5 h-2.5 text-primary/40" />
+                                  {formatPKT(b.createdAt)}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <div className="text-sm">{b.pickup} → {b.dropoff}</div>
+                              <div className="text-xs text-muted-foreground">{b.timing}</div>
+                            </td>
+                            <td className="p-3">
+                              <span className="text-sm font-semibold text-primary">{b.fare}</span>
+                            </td>
+                            <td className="p-3">
+                              <DeadlineBadge startDate={b.startDate} />
+                              <div className="text-[10px] text-muted-foreground mt-0.5">{b.startDate}</div>
+                            </td>
+                            <td className="p-3">
+                              <button onClick={() => setStatusPopup(b.id)}
+                                className={`px-3 py-1.5 rounded-full text-xs font-semibold border cursor-pointer transition-all hover:scale-105 ${b.status === 'approved' ? 'bg-green-500/20 border-green-500 text-green-400 hover:bg-green-500/30' : 'bg-orange-500/20 border-orange-500 text-orange-400 hover:bg-orange-500/30'}`}>
+                                {b.status === 'approved' ? 'Approved' : 'Pending'}
+                              </button>
+                            </td>
+                            <td className="p-3">
+                              <button onClick={() => setCarPopup(b.id)}
+                                className="px-2 py-1.5 bg-primary/15 border border-primary/50 rounded-lg text-xs font-medium hover:bg-primary/25 hover:scale-105 transition-all max-w-[160px] truncate flex items-center gap-1">
+                                {b.assignedCar ? (
+                                  <>
+                                    {carImages[b.assignedCar] && <img src={carImages[b.assignedCar]} alt="" className="w-5 h-4 object-cover rounded flex-shrink-0" />}
+                                    <Car className="w-3 h-3 flex-shrink-0" /><span className="truncate">{b.assignedCar}</span>
+                                  </>
+                                ) : <span className="text-orange-400">Select Car</span>}
+                              </button>
+                            </td>
+                            <td className="p-3">
+                              <button onClick={() => setDriverPopup(b.id)}
+                                className="px-2 py-1.5 bg-primary/15 border border-primary/50 rounded-lg text-xs font-medium hover:bg-primary/25 hover:scale-105 transition-all max-w-[140px] truncate flex items-center gap-1">
+                                {assignedDriverObj ? (
+                                  <>
+                                    {driverImages[assignedDriverObj.id] && <img src={driverImages[assignedDriverObj.id]} alt="" className="w-4 h-4 object-cover rounded-full flex-shrink-0" />}
+                                    <UserRound className="w-3 h-3 flex-shrink-0" /><span className="truncate">{assignedDriverObj.name}</span>
+                                  </>
+                                ) : <span className="text-orange-400 flex items-center gap-1"><UserRound className="w-3 h-3" /> Assign</span>}
+                              </button>
+                            </td>
+                            <td className="p-3">
+                              <div className="flex flex-col gap-1.5">
+                                {editingInvoiceNum === b.id ? (
+                                  <div className="flex items-center gap-1">
+                                    <Hash className="w-3 h-3 text-primary flex-shrink-0" />
+                                    <input autoFocus value={customInvoiceNums[b.id] ?? `INV-${b.id}`}
+                                      onChange={e => setCustomInvoiceNums(prev => ({ ...prev, [b.id]: e.target.value }))}
+                                      onBlur={() => setEditingInvoiceNum(null)}
+                                      onKeyDown={e => e.key === 'Enter' && setEditingInvoiceNum(null)}
+                                      className="w-24 px-1.5 py-1 bg-input border border-primary/60 rounded text-xs text-foreground focus:outline-none focus:border-primary"
+                                      placeholder={`INV-${b.id}`} />
+                                  </div>
+                                ) : (
+                                  <button onClick={() => { if (!customInvoiceNums[b.id]) setCustomInvoiceNums(prev => ({ ...prev, [b.id]: `INV-${b.id}` })); setEditingInvoiceNum(b.id); }}
+                                    className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors" title="Edit invoice number">
+                                    <Pencil className="w-2.5 h-2.5" />
+                                    <span className="font-mono">{customInvoiceNums[b.id] || `INV-${b.id}`}</span>
+                                  </button>
+                                )}
+                                <div className="flex gap-1.5">
+                                  <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
+                                  <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                                  <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
+                                  <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -1969,6 +2275,96 @@ const AdminPanel = () => {
             </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* ── Driver Management ── */}
+            <div className="bg-card border border-border rounded-2xl p-5">
+              <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
+                <UserRound className="w-5 h-5" /> Driver Management
+              </h3>
+              <p className="text-xs text-muted-foreground mb-4">Add drivers with their name, phone, and photo. Assign them to bookings. Driver details are included in generated invoices.</p>
+
+              {/* Add new driver */}
+              <div className="flex flex-col gap-2 mb-5">
+                <input value={newDriverName} onChange={e => setNewDriverName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAddDriver()}
+                  placeholder="Driver full name"
+                  className="px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none transition-colors" />
+                <div className="flex gap-2">
+                  <input value={newDriverPhone} onChange={e => setNewDriverPhone(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleAddDriver()}
+                    placeholder="Phone number (optional)"
+                    className="flex-1 px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none transition-colors" />
+                  <button onClick={handleAddDriver} disabled={addingDriver || !newDriverName.trim()}
+                    className="bg-primary text-primary-foreground px-3 py-2.5 rounded-xl font-bold hover:bg-primary/80 hover:scale-105 transition-all disabled:opacity-50">
+                    {addingDriver ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {driversList.length === 0 && (
+                <p className="text-center text-sm text-muted-foreground py-6 italic">No drivers added yet</p>
+              )}
+              <div className="flex flex-col gap-3">
+                {driversList.map(driver => (
+                  <div key={driver.id} className="bg-primary/5 border border-border rounded-xl p-3 hover:border-primary/40 transition-all">
+                    <div className="flex items-center gap-3">
+                      {/* Clickable photo thumbnail */}
+                      <button
+                        onClick={() => driverImages[driver.id] && setViewDriverImage({ driverName: driver.name, url: driverImages[driver.id] })}
+                        className={`flex-shrink-0 ${driverImages[driver.id] ? 'cursor-zoom-in' : 'cursor-default'}`}
+                        title={driverImages[driver.id] ? "View full image" : "No photo yet"}>
+                        {driverImages[driver.id] ? (
+                          <img src={driverImages[driver.id]} alt={driver.name}
+                            className="w-12 h-12 object-cover rounded-full border-2 border-primary/30 hover:border-primary transition-colors"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        ) : (
+                          <div className="w-12 h-12 bg-primary/10 rounded-full border border-border flex items-center justify-center">
+                            <UserRound className="w-6 h-6 text-primary/40" />
+                          </div>
+                        )}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{driver.name}</p>
+                        {driver.phone && <p className="text-xs text-muted-foreground">{driver.phone}</p>}
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {uploadingDriver === driver.id ? (
+                            <span className="text-primary flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Uploading...</span>
+                          ) : driverImages[driver.id] ? (
+                            <span className="text-green-400">Photo uploaded</span>
+                          ) : 'No photo'}
+                        </p>
+                      </div>
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        <label htmlFor={`drv-img-${driver.id}`}
+                          className="cursor-pointer bg-primary/20 hover:bg-primary/30 p-1.5 rounded-lg transition-all hover:scale-110 flex items-center"
+                          title="Upload photo">
+                          {uploadingDriver === driver.id ? <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" /> : <ImageIcon className="w-3.5 h-3.5 text-primary" />}
+                        </label>
+                        <input id={`drv-img-${driver.id}`} type="file" accept="image/*" capture="user"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) compressAndSaveDriverImage(driver, file);
+                            e.target.value = '';
+                          }} />
+                        {driverImages[driver.id] && (
+                          <button onClick={() => handleRemoveDriverImage(driver.id)}
+                            className="bg-destructive/20 hover:bg-destructive/30 p-1.5 rounded-lg transition-all hover:scale-110"
+                            title="Remove photo">
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </button>
+                        )}
+                        <button onClick={() => handleDeleteDriver(driver.id)}
+                          className="bg-destructive/10 hover:bg-destructive/20 p-1.5 rounded-lg transition-all hover:scale-110 opacity-60 hover:opacity-100"
+                          title="Remove driver">
+                          <X className="w-3.5 h-3.5 text-destructive" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* ── Car Images + Cars Management ── */}
             <div className="bg-card border border-border rounded-2xl p-5">
               <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
@@ -2220,6 +2616,55 @@ const AdminPanel = () => {
                 onImageClick={carImages[c] ? (e) => { e.stopPropagation(); setViewCarImage({ car: c, url: carImages[c] }); } : undefined}
               />
             ))}
+          </div>
+        )}
+      </PopupModal>
+
+      {/* Driver Assignment Popup */}
+      <PopupModal open={driverPopup !== null} onClose={() => setDriverPopup(null)} title="Assign Driver">
+        {activeBookingForDriver && (
+          <div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Assign driver for <span className="text-foreground font-semibold">{activeBookingForDriver.name}</span>
+            </p>
+            {driversList.length === 0 ? (
+              <div className="text-center py-6">
+                <UserRound className="w-10 h-10 text-muted-foreground/40 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No drivers added yet.</p>
+                <p className="text-xs text-muted-foreground mt-1">Add drivers in the Settings tab first.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-primary/70 mb-3 flex items-center gap-1">
+                  <ImageIcon className="w-3 h-3" /> Tap photo to view full image
+                </p>
+                {activeBookingForDriver.assignedDriver && (
+                  <button onClick={() => unassignDriver(activeBookingForDriver.id)}
+                    className="w-full mb-3 py-2.5 border border-destructive/40 text-destructive rounded-lg text-sm font-medium hover:bg-destructive/10 transition-colors flex items-center justify-center gap-2">
+                    <X className="w-4 h-4" /> Remove Driver Assignment
+                  </button>
+                )}
+                {driversList.map(d => (
+                  <PopupOption
+                    key={d.id}
+                    label={`${d.name}${d.phone ? ` • ${d.phone}` : ''}`}
+                    icon={
+                      driverImages[d.id] ? (
+                        <img src={driverImages[d.id]} alt="" className="w-10 h-10 object-cover rounded-full border-2 border-primary/20"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      ) : (
+                        <div className="w-10 h-10 bg-primary/10 rounded-full border border-border flex items-center justify-center">
+                          <UserRound className="w-5 h-5 text-primary/40" />
+                        </div>
+                      )
+                    }
+                    active={activeBookingForDriver.assignedDriver === d.id}
+                    onClick={() => assignDriver(activeBookingForDriver.id, d.id)}
+                    onImageClick={driverImages[d.id] ? (e) => { e.stopPropagation(); setViewDriverImage({ driverName: d.name, url: driverImages[d.id] }); } : undefined}
+                  />
+                ))}
+              </>
+            )}
           </div>
         )}
       </PopupModal>

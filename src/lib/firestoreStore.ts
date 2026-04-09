@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from './firebase';
-import type { Booking, Notification, RouteData, PaymentInfo, CompanyInfo } from './store';
+import type { Booking, Notification, RouteData, PaymentInfo, CompanyInfo, DriverInfo } from './store';
 
 // ─── Bookings ───────────────────────────────────────────────────────────────
 
@@ -315,5 +315,59 @@ export function subscribeToPaymentInfo(callback: (info: PaymentInfo) => void): (
     console.error('Firestore payment info subscription error:', err);
   });
   return unsub;
+}
+
+// ─── Drivers ─────────────────────────────────────────────────────────────────
+
+export async function uploadDriverImageToStorage(driverName: string, base64DataUrl: string): Promise<string> {
+  const safeName = driverName.replace(/[^a-zA-Z0-9]/g, '_');
+  const storageRef = ref(storage, `driver-images/${safeName}`);
+  await uploadString(storageRef, base64DataUrl, 'data_url');
+  return await getDownloadURL(storageRef);
+}
+
+export async function deleteDriverImageFromStorage(driverName: string): Promise<void> {
+  try {
+    const safeName = driverName.replace(/[^a-zA-Z0-9]/g, '_');
+    const storageRef = ref(storage, `driver-images/${safeName}`);
+    await deleteObject(storageRef);
+  } catch {
+    // Ignore if file doesn't exist
+  }
+}
+
+export async function saveDriversListToFirestore(drivers: DriverInfo[]): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'driversList'), { drivers, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save drivers list error:', err);
+  }
+}
+
+export function subscribeToDriversList(callback: (drivers: DriverInfo[]) => void): () => void {
+  const unsub = onSnapshot(doc(db, 'settings', 'driversList'), (snap) => {
+    if (snap.exists() && snap.data().drivers) callback(snap.data().drivers as DriverInfo[]);
+  }, (err) => {
+    console.error('Firestore drivers list subscription error:', err);
+  });
+  return unsub;
+}
+
+export async function saveDriverImagesToFirestore(images: Record<string, string>): Promise<void> {
+  try {
+    await setDoc(doc(db, 'settings', 'driverImages'), { images, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error('Firestore save driver images error:', err);
+  }
+}
+
+export async function getDriverImagesFromFirestore(): Promise<Record<string, string>> {
+  try {
+    const snap = await getDoc(doc(db, 'settings', 'driverImages'));
+    if (snap.exists()) return snap.data().images || {};
+    return {};
+  } catch {
+    return {};
+  }
 }
 

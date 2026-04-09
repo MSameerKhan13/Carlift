@@ -22,19 +22,22 @@ A React-based car lift / ride booking application with route browsing, monthly p
 
 ## Admin Panel Features
 - **Auth**: Firebase Auth signup/signin with Firestore role check (`role: 'admin'`). No hardcoded emails. Includes "Register Admin" tab.
-- **Bookings Tab**: Real-time Firestore subscription, status update, car assignment, WhatsApp messaging, PDF invoice generation, delete.
+- **Bookings Tab**: Real-time Firestore subscription; responsive dual-layout (mobile card + desktop table). Status update, car assignment, **driver assignment**, WhatsApp messaging, PDF invoice generation (with driver info), delete.
 - **Car Assignment Enforcement**: Status cannot be set to "approved" until a car is assigned. Warning shown in status popup.
+- **Driver Assignment**: Assign any managed driver to a booking from a popup modal. Driver's photo, name, and phone shown inline. Persisted to Firestore (`assignedDriver` field on booking).
 - **Routes Tab**: Manage pickup/dropoff locations (synced to Firestore `settings/locations`), route overview.
 - **Settings Tab**:
   - **Company Info**: Name, tagline, phone, email, address — saved to Firestore, used in PDF invoices.
+  - **Driver Management**: Add drivers (name + phone). Upload/remove profile photo (Firebase Storage + Firestore). View full photo on tap. Delete driver. Driver info appears in PDF invoices.
   - **Routes Management**: Add/edit/delete routes with titles and timings.
   - **Fare Rate Per KM**: Dynamic fare rate saved to Firestore.
   - **Monthly Working Days**: Base working days, synced to Firestore.
   - **Payment Info**: Easypaisa, JazzCash, Bank Transfer — synced to Firestore.
   - **Fleet Management**: Add/remove cars dynamically (saved to Firestore `settings/carsList`). Upload car images to Firebase Storage. View full image on click. Revenue per vehicle shown.
+- **Mobile-Responsive Header**: Compact logo + status row; scrollable stats strip on small screens; Back/Logout buttons collapse label on mobile.
 
 ## Key Data Architecture
-- `bookings/{id}` — Booking documents in Firestore
+- `bookings/{id}` — Booking documents in Firestore (includes `assignedDriver` field)
 - `settings/locations` — Pickup locations + dropoff map
 - `settings/carImages` — Car image URLs (from Firebase Storage)
 - `settings/carsList` — Dynamic fleet list
@@ -42,9 +45,11 @@ A React-based car lift / ride booking application with route browsing, monthly p
 - `settings/fareRate` — farePerKm + workingDays
 - `settings/paymentInfo` — Payment account details
 - `settings/routes` — Route definitions
+- `settings/driversList` — Array of `DriverInfo` objects `{ id, name, phone }`
+- `settings/driverImages` — Driver image URLs keyed by driver id
 - `users/{uid}` — User profiles with `role: 'admin' | 'user'`
 - `adminNotifications` — Admin notification feed
-- Firebase Storage: `car-images/{carName}` for vehicle photos
+- Firebase Storage: `car-images/{carName}` for vehicle photos, `driver-images/{safeName}` for driver photos
 
 ## User Panel (BookRide.tsx) Features
 - Route carousel with morning/evening time slots
@@ -59,9 +64,12 @@ A React-based car lift / ride booking application with route browsing, monthly p
 ## PDF Invoice
 - Dynamic company info header (from Firestore)
 - Company logo embedded
-- Customer details, route, fare, status
-- "Click to view car image" hyperlink (if car image is a Firebase Storage URL)
-- Professional styled footer
+- Customer details, route, fare, status, start date
+- Car section: embedded image (base64 or Firebase Storage URL via canvas) or fallback link
+- Driver section: embedded profile photo + driver name + phone (if driver assigned)
+- Editable invoice number per booking (inline click-to-edit)
+- WhatsApp sharing: Web Share API on mobile (with PDF file), desktop fallback (download + open WhatsApp Web)
+- Professional styled footer with company contact
 
 ## Firebase Configuration
 - Project: car-lift-98b84
