@@ -45,7 +45,7 @@ const RouteCarousel = ({ routes }: { routes: RouteData[] }) => {
         <div className="absolute bottom-0 right-0 w-56 h-56 bg-primary/10 rounded-full blur-3xl translate-x-1/2 translate-y-1/2 pointer-events-none" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-primary/5 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative px-14 py-10 text-center">
+        <div className="relative px-8 sm:px-14 py-8 text-center">
           {/* Badge */}
           <div className="inline-flex items-center gap-2 bg-primary/15 border border-primary/40 rounded-full px-4 py-1.5 mb-7">
             <Navigation className="w-3.5 h-3.5 text-primary animate-pulse" />

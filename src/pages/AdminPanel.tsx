@@ -1158,8 +1158,20 @@ const AdminPanel = () => {
     await deleteBookingFromFirestore(id);
   };
 
+  // Format Pakistani number for wa.me (03001234567 → 923001234567)
+  const formatWANumber = (num: string) => {
+    const clean = num.replace(/\D/g, '');
+    if (clean.startsWith('0') && clean.length === 11) return '92' + clean.slice(1);
+    if (clean.startsWith('92')) return clean;
+    return clean;
+  };
+
   const sendWhatsApp = (b: Booking) => {
-    window.open(`https://wa.me/${b.whatsapp}?text=Your%20booking%20${b.status}`, '_blank');
+    const waNum = formatWANumber(b.whatsapp);
+    const msg = encodeURIComponent(
+      `Dear ${b.name},\n\nYour Car Lift booking (${b.pickup} → ${b.dropoff}) is *${b.status.toUpperCase()}*.\nFare: ${b.fare}\nStart Date: ${b.startDate}\n\nThank you for choosing Car Lift!`
+    );
+    window.open(`https://wa.me/${waNum}?text=${msg}`, '_blank');
   };
 
   const handleMarkAllRead = () => {
