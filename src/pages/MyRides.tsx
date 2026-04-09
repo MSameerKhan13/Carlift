@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { onAuthStateChanged, type User as FBUser } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToUserBookings } from "@/lib/firestoreStore";
-import { getBookings, type Booking } from "@/lib/store";
+import type { Booking } from "@/lib/store";
 
 // Format date/time in Pakistan Standard Time (Karachi)
 function formatPKT(isoString: string): string {
@@ -40,8 +40,7 @@ const MyRides = () => {
   useEffect(() => {
     if (fbUser === undefined) return;
     if (!fbUser) {
-      const local = getBookings();
-      setBookings(local);
+      setBookings([]);
       setLoading(false);
       return;
     }

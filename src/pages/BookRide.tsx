@@ -425,6 +425,7 @@ const BookRide = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!fbUser) { alert('Please sign in to submit a booking'); return; }
     if (!fullName || whatsapp.length !== 11) { alert('Valid name and 11-digit WhatsApp required'); return; }
     if (!pickup || !dropoff || !timing || !carClass || !startDate) { alert('Complete all fields'); return; }
     if (payments.length === 0) { alert('Select payment method'); return; }
@@ -432,7 +433,7 @@ const BookRide = () => {
     const bookingId = Date.now();
     const newBooking: Booking = {
       id: bookingId,
-      userId: fbUser?.uid || '',
+      userId: fbUser.uid,
       name: fullName, whatsapp, pickup, dropoff, timing,
       class: carClass, startDate, payment: payments.join(', '),
       fare: fare ? `Rs ${fare.total.toLocaleString()}/month (${totalDays} days${weekendOption !== 'none' ? `, incl. ${weekendOption === 'saturday' ? 'Saturdays' : 'Sat & Sun'}` : ''})` : 'TBD',

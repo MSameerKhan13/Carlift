@@ -67,7 +67,9 @@ export async function deleteBookingFromFirestore(id: number): Promise<void> {
 
 export async function addNotificationToFirestore(message: string, bookingId: number): Promise<void> {
   try {
+    const stableId = Date.now();
     await addDoc(collection(db, 'adminNotifications'), {
+      id: stableId,
       message,
       bookingId,
       read: false,
@@ -82,11 +84,18 @@ export async function addNotificationToFirestore(message: string, bookingId: num
 export function subscribeToNotifications(callback: (notifications: Notification[]) => void): () => void {
   const q = query(collection(db, 'adminNotifications'), orderBy('createdAt', 'desc'));
   const unsub = onSnapshot(q, (snap) => {
-    const notifications: Notification[] = snap.docs.map(d => ({
-      id: d.data().id || parseInt(d.id) || Date.now(),
-      ...d.data(),
-      _docId: d.id,
-    } as Notification & { _docId: string }));
+    const notifications: Notification[] = snap.docs.map(d => {
+      const data = d.data();
+      // Use stored numeric id if available; otherwise derive a stable id from the doc ID
+      const stableId: number = typeof data.id === 'number' && !isNaN(data.id)
+        ? data.id
+        : Math.abs(d.id.split('').reduce((h, c) => (Math.imul(31, h) + c.charCodeAt(0)) | 0, 0));
+      return {
+        ...data,
+        id: stableId,
+        _docId: d.id,
+      } as Notification & { _docId: string };
+    });
     callback(notifications);
   }, (err) => {
     console.error('Firestore notifications subscription error:', err);

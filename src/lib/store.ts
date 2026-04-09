@@ -2,7 +2,7 @@
 
 export interface Booking {
   id: number;
-  userId?: string;
+  userId: string;
   name: string;
   whatsapp: string;
   pickup: string;
@@ -134,16 +134,20 @@ export async function getDistanceFromOSRM(pickup: string, dropoff: string): Prom
   const from = LOCATION_COORDS[pickup];
   const to = LOCATION_COORDS[dropoff];
   if (!from || !to) return DISTANCE_DB[`${pickup}-${dropoff}`] || null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
     if (!res.ok) throw new Error('OSRM fetch failed');
     const data = await res.json();
     if (data.code === 'Ok' && data.routes?.[0]) {
       return Math.round((data.routes[0].distance / 1000) * 10) / 10;
     }
-    return null;
+    return DISTANCE_DB[`${pickup}-${dropoff}`] || null;
   } catch {
+    clearTimeout(timeoutId);
     return DISTANCE_DB[`${pickup}-${dropoff}`] || null;
   }
 }
