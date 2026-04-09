@@ -3,6 +3,7 @@
   "short_name": "Admin CarLift",
   "description": "Car Lift Admin – Manage bookings, routes & notifications",
   "start_url": "/carlift-admin",
+  "scope": "/carlift-admin",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#cc0000",

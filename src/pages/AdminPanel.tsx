@@ -4,7 +4,7 @@ import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
   ImageIcon, DollarSign, BarChart3, Loader2, Wifi, LogIn, Eye, EyeOff, Building2, Phone, Mail,
-  ChevronRight, CalendarClock, Share2
+  ChevronRight, CalendarClock, Share2, Hash, Pencil
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import {
@@ -142,13 +142,44 @@ function loadLogoBase64(): Promise<string> {
   });
 }
 
+// ── Load remote image as base64 (for embedding in PDF) ────────────────────────
+async function loadImageBase64FromUrl(url: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const MAX = 800;
+        let w = img.width, h = img.height;
+        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch { resolve(''); }
+    };
+    img.onerror = () => resolve('');
+    img.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+  });
+}
+
 // ── Invoice PDF Builder (returns jsPDF doc) ───────────────────────────────────
-async function buildInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
+async function buildInvoicePDF(
+  b: Booking,
+  carImages: Record<string, string>,
+  companyInfo: CompanyInfo,
+  invoiceNum?: string
+) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
 
   const logoBase64 = await loadLogoBase64();
+
+  // Try to load car image for embedding
+  const carImgBase64 = (b.assignedCar && carImages[b.assignedCar] && carImages[b.assignedCar].startsWith('http'))
+    ? await loadImageBase64FromUrl(carImages[b.assignedCar])
+    : '';
 
   // Booking date formatted in PKT
   const bookingDatePKT = b.createdAt
@@ -159,77 +190,80 @@ async function buildInvoicePDF(b: Booking, carImages: Record<string, string>, co
       })
     : '—';
 
-  // Header background
-  doc.setFillColor(8, 8, 8);
-  doc.rect(0, 0, pageW, 52, 'F');
-  doc.setFillColor(200, 0, 0);
-  doc.rect(0, 52, pageW, 2.5, 'F');
+  const invNum = invoiceNum || `INV-${b.id}`;
 
-  // Logo
+  // ── Header ────────────────────────────────────────────────────────────────
+  doc.setFillColor(8, 8, 8);
+  doc.rect(0, 0, pageW, 46, 'F');
+  doc.setFillColor(200, 0, 0);
+  doc.rect(0, 46, pageW, 2.5, 'F');
+
   if (logoBase64) {
-    try { doc.addImage(logoBase64, 'PNG', 12, 6, 44, 38); } catch { /* skip */ }
+    try { doc.addImage(logoBase64, 'PNG', 12, 5, 38, 33); } catch { /* skip */ }
   }
 
-  // Company info (dynamic)
-  doc.setTextColor(220, 220, 220);
-  doc.setFontSize(8);
+  // Company info
+  doc.setTextColor(210, 210, 210);
+  doc.setFontSize(9.5);
+  doc.setFont("helvetica", "bold");
+  doc.text(companyInfo.tagline || 'Premium Monthly Car Service', 56, 13);
   doc.setFont("helvetica", "normal");
-  doc.text(companyInfo.tagline || 'Premium Monthly Car Service', 62, 16);
   doc.setTextColor(200, 0, 0);
+  doc.setFontSize(8.5);
+  doc.text(`Call: ${companyInfo.phone}`, 56, 21);
+  doc.text(`Email: ${companyInfo.email}`, 56, 28);
+  doc.setTextColor(155, 155, 155);
   doc.setFontSize(7.5);
-  doc.text(`Call: ${companyInfo.phone}`, 62, 23);
-  doc.text(`Email: ${companyInfo.email}`, 62, 29);
-  doc.setTextColor(160, 160, 160);
-  doc.setFontSize(6.5);
-  doc.text(companyInfo.address, 62, 35);
-  if (companyInfo.address2) doc.text(companyInfo.address2, 62, 40);
+  doc.text(companyInfo.address, 56, 35);
+  if (companyInfo.address2) doc.text(companyInfo.address2, 56, 41);
 
   // INVOICE title
   doc.setTextColor(200, 0, 0);
-  doc.setFontSize(24);
+  doc.setFontSize(26);
   doc.setFont("helvetica", "bold");
-  doc.text("INVOICE", pageW - 14, 22, { align: "right" });
-  doc.setTextColor(160, 160, 160);
-  doc.setFontSize(8);
+  doc.text("INVOICE", pageW - 14, 20, { align: "right" });
+  doc.setTextColor(175, 175, 175);
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text(`#INV-${b.id}`, pageW - 14, 30, { align: "right" });
+  doc.text(`#${invNum}`, pageW - 14, 29, { align: "right" });
   doc.text(new Date().toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }), pageW - 14, 37, { align: "right" });
 
-  // Billed To
-  const billY = 62;
+  // ── Billed To ─────────────────────────────────────────────────────────────
+  const billY = 55;
   doc.setFillColor(16, 16, 16);
-  doc.roundedRect(14, billY, (pageW - 28) * 0.55, 36, 3, 3, 'F');
+  doc.roundedRect(14, billY, (pageW - 28) * 0.56, 34, 3, 3, 'F');
   doc.setFillColor(200, 0, 0);
-  doc.rect(14, billY, 3.5, 36, 'F');
+  doc.rect(14, billY, 3.5, 34, 'F');
   doc.setTextColor(200, 0, 0);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
-  doc.text("BILLED TO", 22, billY + 10);
-  doc.setTextColor(235, 235, 235);
-  doc.setFontSize(12);
-  doc.text(b.name, 22, billY + 20);
-  doc.setTextColor(140, 140, 140);
-  doc.setFontSize(8.5);
+  doc.text("BILLED TO", 22, billY + 9);
+  doc.setTextColor(240, 240, 240);
+  doc.setFontSize(13);
+  doc.text(b.name, 22, billY + 19);
+  doc.setTextColor(165, 165, 165);
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text(`WhatsApp: ${b.whatsapp}`, 22, billY + 28);
-  doc.text(`Start Date: ${b.startDate}`, 22, billY + 34);
+  doc.text(`WhatsApp: ${b.whatsapp}`, 22, billY + 27);
+  doc.text(`Start Date: ${b.startDate}`, 22, billY + 33);
 
   // Status badge
-  const badgeX = pageW - 14 - 52;
+  const badgeX = pageW - 14 - 54;
   const isApproved = b.status === 'approved';
   doc.setFillColor(isApproved ? 0 : 180, isApproved ? 140 : 80, isApproved ? 0 : 0);
-  doc.roundedRect(badgeX, billY + 4, 52, 16, 3, 3, 'F');
+  doc.roundedRect(badgeX, billY + 6, 54, 17, 3, 3, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(9);
+  doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(isApproved ? 'APPROVED' : 'PENDING', badgeX + 26, billY + 14, { align: "center" });
+  doc.text(isApproved ? 'APPROVED' : 'PENDING', badgeX + 27, billY + 17, { align: "center" });
 
-  // Table
-  const tableY = billY + 44;
+  // ── Table ─────────────────────────────────────────────────────────────────
+  const ROW_H = 13;
+  const tableY = billY + 42;
   doc.setFillColor(200, 0, 0);
   doc.rect(14, tableY, pageW - 28, 12, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(9);
+  doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   doc.text("DESCRIPTION", 20, tableY + 8.5);
   doc.text("DETAILS", pageW - 20, tableY + 8.5, { align: "right" });
@@ -246,72 +280,104 @@ async function buildInvoicePDF(b: Booking, carImages: Record<string, string>, co
 
   let ry = tableY + 12;
   rows.forEach((row, i) => {
-    const bg = i % 2 === 0 ? 20 : 13;
+    const bg = i % 2 === 0 ? 22 : 14;
     doc.setFillColor(bg, bg, bg);
-    doc.rect(14, ry, pageW - 28, 12, 'F');
-    doc.setTextColor(130, 130, 130);
-    doc.setFontSize(8.5);
+    doc.rect(14, ry, pageW - 28, ROW_H, 'F');
+    // Left accent stripe on odd rows
+    if (i % 2 === 0) {
+      doc.setFillColor(200, 0, 0);
+      doc.rect(14, ry, 2.5, ROW_H, 'F');
+    }
+    doc.setTextColor(190, 190, 190);
+    doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text(row[0], 20, ry + 8.5);
-    doc.setTextColor(225, 225, 225);
+    doc.text(row[0], 21, ry + ROW_H * 0.65);
+    doc.setTextColor(235, 235, 235);
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
     const val = row[1] || '—';
-    doc.text(val, pageW - 20, ry + 8.5, { align: "right" });
-    ry += 12;
+    doc.text(val, pageW - 20, ry + ROW_H * 0.65, { align: "right" });
+    ry += ROW_H;
   });
 
-  // Car image link row (if car assigned and has Storage URL)
-  if (b.assignedCar && carImages[b.assignedCar] && carImages[b.assignedCar].startsWith('http')) {
-    const carImgUrl = carImages[b.assignedCar];
-    doc.setFillColor(30, 10, 10);
-    doc.rect(14, ry, pageW - 28, 12, 'F');
+  // ── Car image row ─────────────────────────────────────────────────────────
+  if (b.assignedCar) {
+    const CAR_IMG_H = 28;
+    doc.setFillColor(18, 6, 6);
+    doc.rect(14, ry, pageW - 28, CAR_IMG_H, 'F');
     doc.setFillColor(200, 0, 0);
-    doc.rect(14, ry, 2, 12, 'F');
-    doc.setTextColor(130, 130, 130);
-    doc.setFontSize(8.5);
+    doc.rect(14, ry, 2.5, CAR_IMG_H, 'F');
+
+    doc.setTextColor(190, 190, 190);
+    doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text("Car Image", 20, ry + 8.5);
-    doc.setTextColor(100, 150, 255);
-    doc.setFont("helvetica", "bold");
-    doc.textWithLink("Click to view car image", pageW - 20, ry + 8.5, { url: carImgUrl, align: "right" });
-    ry += 12;
+    doc.text("Assigned Car Photo", 21, ry + 8);
+
+    if (carImgBase64) {
+      try {
+        doc.addImage(carImgBase64, 'JPEG', pageW - 20 - 44, ry + 2, 44, CAR_IMG_H - 4);
+      } catch {
+        doc.setTextColor(100, 150, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, {
+          url: carImages[b.assignedCar] || '',
+          align: "right"
+        });
+      }
+    } else if (carImages[b.assignedCar] && carImages[b.assignedCar].startsWith('http')) {
+      doc.setTextColor(100, 150, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H / 2 + 3, {
+        url: carImages[b.assignedCar],
+        align: "right"
+      });
+    } else {
+      doc.setTextColor(155, 155, 155);
+      doc.setFontSize(9);
+      doc.text("No image uploaded", pageW - 20, ry + CAR_IMG_H / 2 + 3, { align: "right" });
+    }
+    ry += CAR_IMG_H;
   }
 
-  // Total fare box
-  ry += 6;
+  // ── Fare box ──────────────────────────────────────────────────────────────
+  ry += 5;
   doc.setFillColor(200, 0, 0);
-  doc.roundedRect(pageW / 2, ry, pageW / 2 - 14, 20, 3, 3, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(8.5);
+  doc.roundedRect(pageW / 2, ry, pageW / 2 - 14, 22, 3, 3, 'F');
+  doc.setTextColor(255, 200, 200);
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text("MONTHLY FARE", pageW / 2 + 6, ry + 8);
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setFont("helvetica", "bold");
-  doc.text(b.fare, pageW - 20, ry + 15, { align: "right" });
+  doc.setTextColor(255, 255, 255);
+  const fareText = b.fare.length > 32 ? b.fare.substring(0, 32) + '…' : b.fare;
+  doc.text(fareText, pageW - 20, ry + 17, { align: "right" });
 
-  // Note
+  // ── Note ─────────────────────────────────────────────────────────────────
   ry += 28;
   doc.setFillColor(16, 16, 16);
-  doc.roundedRect(14, ry, pageW - 28, 14, 2, 2, 'F');
-  doc.setTextColor(120, 120, 120);
-  doc.setFontSize(7.5);
+  doc.roundedRect(14, ry, pageW - 28, 13, 2, 2, 'F');
+  doc.setTextColor(145, 145, 145);
+  doc.setFontSize(8);
   doc.setFont("helvetica", "italic");
-  doc.text("This is a system-generated invoice. Payment should be sent via the selected method before the start date.", 20, ry + 9);
+  doc.text("System-generated invoice. Send payment via the selected method before start date.", 20, ry + 8.5);
 
-  // Footer
-  const footerY = pageH - 28;
+  // ── Footer ────────────────────────────────────────────────────────────────
+  const footerY = pageH - 26;
   doc.setFillColor(8, 8, 8);
-  doc.rect(0, footerY, pageW, 28, 'F');
+  doc.rect(0, footerY, pageW, 26, 'F');
   doc.setFillColor(200, 0, 0);
   doc.rect(0, footerY, pageW, 2, 'F');
-  doc.setTextColor(90, 90, 90);
-  doc.setFontSize(7.5);
-  doc.setFont("helvetica", "normal");
+  doc.setTextColor(110, 110, 110);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
   doc.text(companyInfo.name.toUpperCase() + " — CONTACT", pageW / 2, footerY + 9, { align: "center" });
-  doc.setTextColor(120, 120, 120);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(130, 130, 130);
   doc.text(`Call: ${companyInfo.phone}  |  Email: ${companyInfo.email}`, pageW / 2, footerY + 15, { align: "center" });
-  doc.text(companyInfo.address, pageW / 2, footerY + 20, { align: "center" });
-  if (companyInfo.address2) doc.text(companyInfo.address2, pageW / 2, footerY + 25, { align: "center" });
+  doc.text(companyInfo.address + (companyInfo.address2 ? '  |  ' + companyInfo.address2 : ''), pageW / 2, footerY + 21, { align: "center" });
 
   return doc;
 }
@@ -322,14 +388,14 @@ function getInvoiceFileName(b: Booking) {
   return `CarLift_Invoice_${safeName}_${b.id}.pdf`;
 }
 
-async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
-  const doc = await buildInvoicePDF(b, carImages, companyInfo);
+async function generateInvoicePDF(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo, invoiceNum?: string) {
+  const doc = await buildInvoicePDF(b, carImages, companyInfo, invoiceNum);
   doc.save(getInvoiceFileName(b));
 }
 
 // ── Share Invoice PDF via WhatsApp ────────────────────────────────────────────
-async function shareInvoicePDFWhatsApp(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo) {
-  const doc = await buildInvoicePDF(b, carImages, companyInfo);
+async function shareInvoicePDFWhatsApp(b: Booking, carImages: Record<string, string>, companyInfo: CompanyInfo, invoiceNum?: string) {
+  const doc = await buildInvoicePDF(b, carImages, companyInfo, invoiceNum);
   const fileName = getInvoiceFileName(b);
 
   const waMsg = encodeURIComponent(
@@ -580,6 +646,10 @@ const AdminPanel = () => {
   const [newRouteTiming, setNewRouteTiming] = useState('');
   const [editingRoute, setEditingRoute] = useState<RouteData | null>(null);
   const [savingRoutes, setSavingRoutes] = useState(false);
+
+  // Custom invoice numbers (editable by admin)
+  const [customInvoiceNums, setCustomInvoiceNums] = useState<Record<number, string>>({});
+  const [editingInvoiceNum, setEditingInvoiceNum] = useState<number | null>(null);
 
   // Add New Routes popup state
   const [showAddRoutePopup, setShowAddRoutePopup] = useState(false);
@@ -1389,11 +1459,38 @@ const AdminPanel = () => {
                           </button>
                         </td>
                         <td className="p-3">
-                          <div className="flex gap-1.5">
-                            <button onClick={() => generateInvoicePDF(b, carImages, companyInfo)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
-                            <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo)} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice PDF via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
-                            <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
-                            <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
+                          <div className="flex flex-col gap-1.5">
+                            {editingInvoiceNum === b.id ? (
+                              <div className="flex items-center gap-1">
+                                <Hash className="w-3 h-3 text-primary flex-shrink-0" />
+                                <input
+                                  autoFocus
+                                  value={customInvoiceNums[b.id] ?? `INV-${b.id}`}
+                                  onChange={e => setCustomInvoiceNums(prev => ({ ...prev, [b.id]: e.target.value }))}
+                                  onBlur={() => setEditingInvoiceNum(null)}
+                                  onKeyDown={e => e.key === 'Enter' && setEditingInvoiceNum(null)}
+                                  className="w-28 px-1.5 py-1 bg-input border border-primary/60 rounded text-xs text-foreground focus:outline-none focus:border-primary"
+                                  placeholder={`INV-${b.id}`}
+                                />
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  if (!customInvoiceNums[b.id]) setCustomInvoiceNums(prev => ({ ...prev, [b.id]: `INV-${b.id}` }));
+                                  setEditingInvoiceNum(b.id);
+                                }}
+                                className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                                title="Edit invoice number">
+                                <Pencil className="w-2.5 h-2.5" />
+                                <span className="font-mono">{customInvoiceNums[b.id] || `INV-${b.id}`}</span>
+                              </button>
+                            )}
+                            <div className="flex gap-1.5">
+                              <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id])} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
+                              <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id])} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice PDF via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                              <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
+                              <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
+                            </div>
                           </div>
                         </td>
                       </tr>

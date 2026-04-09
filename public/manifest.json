@@ -3,6 +3,7 @@
   "short_name": "Car Lift",
   "description": "Book premium monthly car lift rides easily",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#cc0000",

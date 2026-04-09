@@ -592,7 +592,18 @@ const BookRide = () => {
                     </div>
 
                     {distanceKm !== null && (
-                      <p className="text-[10px] text-muted-foreground/60">Distance via OpenStreetMap routing</p>
+                      <div className="flex flex-col items-center gap-1.5">
+                        <p className="text-[10px] text-muted-foreground/60">Distance via OpenStreetMap routing</p>
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(pickup + ', Karachi, Pakistan')}&destination=${encodeURIComponent(dropoff + ', Karachi, Pakistan')}&travelmode=driving`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:text-blue-300 hover:border-blue-400/50 hover:bg-blue-500/15 px-3 py-1.5 rounded-full transition-all font-medium"
+                        >
+                          <MapPin className="w-3 h-3" />
+                          Verify on Google Maps
+                        </a>
+                      </div>
                     )}
                   </div>
                 ) : null
