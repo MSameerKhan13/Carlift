@@ -420,66 +420,82 @@ async function buildInvoicePDF(
 
   // ── Driver Info row ───────────────────────────────────────────────────────
   if (assignedDriver) {
-    const DRIVER_IMG_H = driverImgBase64 ? 34 : 16;
+    // Taller row: photo col on right, text stack on left
+    const DRIVER_ROW_H = driverImgBase64 ? 44 : 20;
+    const PHOTO_W = 36; const PHOTO_H = DRIVER_ROW_H - 4;
     const driverRowBg = (rows.length + (b.assignedCar ? 1 : 0)) % 2 === 0 ? 22 : 14;
     doc.setFillColor(driverRowBg, driverRowBg, driverRowBg);
-    doc.rect(14, ry, pageW - 28, DRIVER_IMG_H, 'F');
+    doc.rect(14, ry, pageW - 28, DRIVER_ROW_H, 'F');
     doc.setFillColor(200, 0, 0);
-    doc.rect(14, ry, 2.5, DRIVER_IMG_H, 'F');
+    doc.rect(14, ry, 2.5, DRIVER_ROW_H, 'F');
 
-    doc.setTextColor(190, 190, 190);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text("Assigned Driver", 21, ry + (driverImgBase64 ? 8 : DRIVER_IMG_H * 0.5));
+    // Left text column
+    doc.setTextColor(155, 155, 155);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("ASSIGNED DRIVER", 21, ry + 9);
+    doc.setTextColor(235, 235, 235);
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text(assignedDriver.name, 21, ry + 21);
+    if (assignedDriver.phone) {
+      doc.setTextColor(160, 160, 160);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.text(`📞 ${assignedDriver.phone}`, 21, ry + 31);
+    }
 
+    // Right photo column
+    const photoX = pageW - 14 - PHOTO_W - 6;
     if (driverImgBase64) {
       try {
         const fmt = driverImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-        doc.addImage(driverImgBase64, fmt, pageW - 20 - 36, ry + 2, 36, DRIVER_IMG_H - 4);
+        // Draw circular clip border
+        doc.setDrawColor(200, 0, 0);
+        doc.setLineWidth(0.5);
+        doc.roundedRect(photoX, ry + 2, PHOTO_W, PHOTO_H, 3, 3, 'S');
+        doc.addImage(driverImgBase64, fmt, photoX, ry + 2, PHOTO_W, PHOTO_H);
       } catch {
-        if (rawDriverImg && rawDriverImg.startsWith('http')) {
+        if (rawDriverImg?.startsWith('http')) {
           doc.setTextColor(100, 160, 255);
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(9);
-          doc.textWithLink("View Driver Photo →", pageW - 20, ry + DRIVER_IMG_H * 0.65, { url: rawDriverImg, align: "right" });
+          doc.setFontSize(8);
+          doc.textWithLink("View Photo →", pageW - 20, ry + DRIVER_ROW_H * 0.6, { url: rawDriverImg, align: "right" });
         }
       }
-    } else if (rawDriverImg && rawDriverImg.startsWith('http')) {
+    } else if (rawDriverImg?.startsWith('http')) {
       doc.setTextColor(100, 160, 255);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9.5);
-      doc.textWithLink("View Driver Photo →", pageW - 20, ry + DRIVER_IMG_H * 0.65, { url: rawDriverImg, align: "right" });
+      doc.setFontSize(9);
+      doc.textWithLink("View Photo →", pageW - 20, ry + DRIVER_ROW_H * 0.6, { url: rawDriverImg, align: "right" });
     } else {
-      doc.setTextColor(120, 120, 120);
-      doc.setFontSize(8.5);
-      doc.setFont("helvetica", "italic");
-      doc.text("Photo not uploaded", pageW - 20, ry + DRIVER_IMG_H * 0.65, { align: "right" });
-    }
-
-    // Second line — driver name + phone
-    const driverLabelY = ry + (driverImgBase64 ? 18 : DRIVER_IMG_H * 0.5);
-    doc.setTextColor(235, 235, 235);
-    doc.setFontSize(9.5);
-    doc.setFont("helvetica", "bold");
-    doc.text(assignedDriver.name, 21, driverLabelY);
-    if (assignedDriver.phone) {
-      doc.setTextColor(160, 160, 160);
+      doc.setTextColor(100, 100, 100);
       doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.text(assignedDriver.phone, 21, driverLabelY + 6);
+      doc.setFont("helvetica", "italic");
+      doc.text("No photo", pageW - 20, ry + DRIVER_ROW_H * 0.6, { align: "right" });
     }
 
-    ry += DRIVER_IMG_H;
+    ry += DRIVER_ROW_H;
   }
 
   // ── Fare box (full-width) ─────────────────────────────────────────────────
   ry += 8;
+
+  // Parse fare: "Rs 28,942 / month (22 working days + 11% SRB tax)"
+  //  → mainFare = "Rs 28,942 / month"
+  //  → fareDetail = "22 working days + 11% SRB tax"
+  const fareRaw = b.fare || '';
+  const parenIdx = fareRaw.indexOf('(');
+  const mainFare = parenIdx > 0 ? fareRaw.substring(0, parenIdx).trim() : fareRaw.trim();
+  const fareDetail = parenIdx > 0 ? fareRaw.substring(parenIdx + 1).replace(/\)$/, '').trim() : '';
+
+  const FARE_BOX_H = fareDetail ? 40 : 32;
   // Shadow layer
   doc.setFillColor(100, 0, 0);
-  doc.roundedRect(16, ry + 2, pageW - 28, 30, 3, 3, 'F');
+  doc.roundedRect(16, ry + 2, pageW - 28, FARE_BOX_H, 3, 3, 'F');
   // Main fare box
   doc.setFillColor(160, 0, 0);
-  doc.roundedRect(14, ry, pageW - 28, 30, 3, 3, 'F');
+  doc.roundedRect(14, ry, pageW - 28, FARE_BOX_H, 3, 3, 'F');
   doc.setFillColor(200, 0, 0);
   doc.roundedRect(14, ry, pageW - 28, 15, 3, 3, 'F');
   doc.setFillColor(160, 0, 0);
@@ -489,19 +505,27 @@ async function buildInvoicePDF(
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
   doc.text("TOTAL MONTHLY FARE", 22, ry + 10);
+  const statusLabel = b.status === 'approved' ? '✓ CONFIRMED' : '⏳ PENDING APPROVAL';
   doc.setTextColor(255, 240, 210);
   doc.setFontSize(7.5);
-  const statusLabel = b.status === 'approved' ? '✓ CONFIRMED' : '⏳ PENDING APPROVAL';
   doc.text(statusLabel, pageW - 20, ry + 10, { align: "right" });
 
-  doc.setFontSize(16);
+  // Main amount — large white text
+  doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(255, 255, 255);
-  const fareText = b.fare.length > 42 ? b.fare.substring(0, 42) + '…' : b.fare;
-  doc.text(fareText, pageW / 2, ry + 24, { align: "center" });
+  doc.text(mainFare, pageW / 2, ry + 25, { align: "center" });
+
+  // Breakdown line — smaller, light red
+  if (fareDetail) {
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(255, 190, 190);
+    doc.text(fareDetail, pageW / 2, ry + 33, { align: "center" });
+  }
 
   // ── Payment notice strip ──────────────────────────────────────────────────
-  ry += 38;
+  ry += FARE_BOX_H + 8;
   doc.setFillColor(10, 10, 10);
   doc.roundedRect(14, ry, pageW - 28, 22, 2, 2, 'F');
   doc.setDrawColor(50, 50, 50);
@@ -665,6 +689,10 @@ const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
           phone: '',
           role: 'admin',
         });
+        // Request notification permission (needed for PWA badge on some platforms)
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().catch(() => {});
+        }
         onLogin();
         setLoading(false);
         return;
@@ -1141,10 +1169,28 @@ const AdminPanel = () => {
 
   useEffect(() => {
     if (!adminUser) return;
-    if (pendingCount > 0) document.title = `(${pendingCount}) CarLift Admin — Pending`;
+    const badgeCount = unreadCount + pendingCount;
+    if (badgeCount > 0) document.title = `(${badgeCount}) CarLift Admin — Pending`;
     else document.title = 'CarLift Admin Panel';
-    updateFaviconBadge(pendingCount);
-  }, [pendingCount, adminUser]);
+    // Favicon canvas badge (browser tab)
+    updateFaviconBadge(badgeCount);
+    // PWA App Badge API — shows badge on home-screen icon (iOS 16.4+, Android Chrome)
+    if ('setAppBadge' in navigator) {
+      if (badgeCount > 0) {
+        (navigator as Navigator & { setAppBadge: (n: number) => Promise<void> })
+          .setAppBadge(badgeCount).catch(() => {});
+      } else {
+        (navigator as Navigator & { clearAppBadge: () => Promise<void> })
+          .clearAppBadge().catch(() => {});
+      }
+    }
+    return () => {
+      if ('clearAppBadge' in navigator) {
+        (navigator as Navigator & { clearAppBadge: () => Promise<void> })
+          .clearAppBadge().catch(() => {});
+      }
+    };
+  }, [pendingCount, unreadCount, adminUser]);
 
   const initialPopupShown = React.useRef(false);
   useEffect(() => {
