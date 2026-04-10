@@ -193,29 +193,10 @@ async function buildInvoicePDF(
 
   const logoBase64 = await loadLogoBase64();
 
-  // Try to load car image for embedding
-  // Handles: (1) base64 data: URL directly, (2) https Firebase Storage URL via canvas conversion
-  let carImgBase64 = '';
+  // Raw URLs only — images are clickable links in the PDF, never embedded
   const rawCarImg = b.assignedCar ? carImages[b.assignedCar] : '';
-  if (rawCarImg) {
-    if (rawCarImg.startsWith('data:')) {
-      carImgBase64 = rawCarImg;
-    } else if (rawCarImg.startsWith('http')) {
-      carImgBase64 = await loadImageBase64FromUrl(rawCarImg);
-    }
-  }
-
-  // Try to load driver image for embedding
   const assignedDriver = driversList?.find(d => d.id === b.assignedDriver);
-  let driverImgBase64 = '';
   const rawDriverImg = assignedDriver && driverImages ? driverImages[assignedDriver.id] : '';
-  if (rawDriverImg) {
-    if (rawDriverImg.startsWith('data:')) {
-      driverImgBase64 = rawDriverImg;
-    } else if (rawDriverImg.startsWith('http')) {
-      driverImgBase64 = await loadImageBase64FromUrl(rawDriverImg);
-    }
-  }
 
   // Booking date formatted in PKT
   const bookingDatePKT = b.createdAt
@@ -379,112 +360,81 @@ async function buildInvoicePDF(
     ry += ROW_H;
   });
 
-  // ── Car image row ─────────────────────────────────────────────────────────
+  // ── Car image row (link only — no embedded image) ─────────────────────────
   if (b.assignedCar) {
-    const CAR_IMG_H = carImgBase64 ? 46 : 16;
-    const imgRowBg = rows.length % 2 === 0 ? 22 : 14;
-    doc.setFillColor(imgRowBg, imgRowBg, imgRowBg);
-    doc.rect(14, ry, pageW - 28, CAR_IMG_H, 'F');
+    const CAR_ROW_H = 18;
+    const rowBgCar = rows.length % 2 === 0 ? 22 : 14;
+    doc.setFillColor(rowBgCar, rowBgCar, rowBgCar);
+    doc.rect(14, ry, pageW - 28, CAR_ROW_H, 'F');
     doc.setFillColor(200, 0, 0);
-    doc.rect(14, ry, 2.5, CAR_IMG_H, 'F');
+    doc.rect(14, ry, 2.5, CAR_ROW_H, 'F');
 
-    // Label
+    // Left label
     doc.setTextColor(155, 155, 155);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("ASSIGNED CAR PHOTO", 21, ry + 9);
+    doc.text("ASSIGNED VEHICLE", 21, ry + 11.5);
 
-    if (carImgBase64) {
-      try {
-        const fmt = carImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-        const imgW = 70; const imgH = CAR_IMG_H - 6;
-        doc.setDrawColor(200, 0, 0);
-        doc.setLineWidth(0.4);
-        doc.roundedRect(pageW - 14 - imgW - 6, ry + 3, imgW, imgH, 2, 2, 'S');
-        doc.addImage(carImgBase64, fmt, pageW - 14 - imgW - 6, ry + 3, imgW, imgH);
-      } catch {
-        if (rawCarImg?.startsWith('http')) {
-          doc.setTextColor(100, 160, 255);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9);
-          doc.textWithLink("View Car Photo →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
-        }
-      }
-    } else if (rawCarImg?.startsWith('http')) {
-      doc.setTextColor(100, 160, 255);
+    // Right: clickable link or "No photo"
+    if (rawCarImg?.startsWith('http')) {
+      doc.setTextColor(100, 170, 255);
+      doc.setFontSize(9);
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9.5);
-      doc.textWithLink("View Car Photo →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
+      doc.textWithLink("Click to view car photo", pageW - 20, ry + 11.5, { url: rawCarImg, align: "right" });
     } else {
-      doc.setTextColor(120, 120, 120);
+      doc.setTextColor(100, 100, 100);
       doc.setFontSize(8.5);
       doc.setFont("helvetica", "italic");
-      doc.text("Photo not uploaded", pageW - 20, ry + CAR_IMG_H * 0.65, { align: "right" });
+      doc.text("No photo uploaded", pageW - 20, ry + 11.5, { align: "right" });
     }
-    // Separator line after car row
+
     doc.setDrawColor(40, 40, 40);
     doc.setLineWidth(0.2);
-    doc.line(14, ry + CAR_IMG_H, 14 + (pageW - 28), ry + CAR_IMG_H);
-    ry += CAR_IMG_H;
+    doc.line(14, ry + CAR_ROW_H, 14 + (pageW - 28), ry + CAR_ROW_H);
+    ry += CAR_ROW_H;
   }
 
-  // ── Driver Info row ───────────────────────────────────────────────────────
+  // ── Driver Info row (link only — no embedded image) ───────────────────────
   if (assignedDriver) {
-    // Taller row: photo col on right, text stack on left
-    const DRIVER_ROW_H = driverImgBase64 ? 44 : 20;
-    const PHOTO_W = 36; const PHOTO_H = DRIVER_ROW_H - 4;
+    const DRIVER_ROW_H = 36;
     const driverRowBg = (rows.length + (b.assignedCar ? 1 : 0)) % 2 === 0 ? 22 : 14;
     doc.setFillColor(driverRowBg, driverRowBg, driverRowBg);
     doc.rect(14, ry, pageW - 28, DRIVER_ROW_H, 'F');
     doc.setFillColor(200, 0, 0);
     doc.rect(14, ry, 2.5, DRIVER_ROW_H, 'F');
 
-    // Left text column
+    // Left: label + name + phone
     doc.setTextColor(155, 155, 155);
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setFont("helvetica", "bold");
     doc.text("ASSIGNED DRIVER", 21, ry + 9);
     doc.setTextColor(235, 235, 235);
-    doc.setFontSize(12);
+    doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
-    doc.text(assignedDriver.name, 21, ry + 21);
+    doc.text(assignedDriver.name, 21, ry + 20);
     if (assignedDriver.phone) {
       doc.setTextColor(160, 160, 160);
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setFont("helvetica", "normal");
-      doc.text(`Ph: ${assignedDriver.phone}`, 21, ry + 31);
+      doc.text(`Ph: ${assignedDriver.phone}`, 21, ry + 29);
     }
 
-    // Right photo column
-    const photoX = pageW - 14 - PHOTO_W - 6;
-    if (driverImgBase64) {
-      try {
-        const fmt = driverImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-        // Draw circular clip border
-        doc.setDrawColor(200, 0, 0);
-        doc.setLineWidth(0.5);
-        doc.roundedRect(photoX, ry + 2, PHOTO_W, PHOTO_H, 3, 3, 'S');
-        doc.addImage(driverImgBase64, fmt, photoX, ry + 2, PHOTO_W, PHOTO_H);
-      } catch {
-        if (rawDriverImg?.startsWith('http')) {
-          doc.setTextColor(100, 160, 255);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(8);
-          doc.textWithLink("View Photo →", pageW - 20, ry + DRIVER_ROW_H * 0.6, { url: rawDriverImg, align: "right" });
-        }
-      }
-    } else if (rawDriverImg?.startsWith('http')) {
-      doc.setTextColor(100, 160, 255);
-      doc.setFont("helvetica", "bold");
+    // Right: clickable driver photo link
+    if (rawDriverImg?.startsWith('http')) {
+      doc.setTextColor(100, 170, 255);
       doc.setFontSize(9);
-      doc.textWithLink("View Photo →", pageW - 20, ry + DRIVER_ROW_H * 0.6, { url: rawDriverImg, align: "right" });
+      doc.setFont("helvetica", "bold");
+      doc.textWithLink("Click to view driver photo", pageW - 20, ry + 20, { url: rawDriverImg, align: "right" });
     } else {
       doc.setTextColor(100, 100, 100);
       doc.setFontSize(8);
       doc.setFont("helvetica", "italic");
-      doc.text("No photo", pageW - 20, ry + DRIVER_ROW_H * 0.6, { align: "right" });
+      doc.text("No photo uploaded", pageW - 20, ry + 20, { align: "right" });
     }
 
+    doc.setDrawColor(40, 40, 40);
+    doc.setLineWidth(0.2);
+    doc.line(14, ry + DRIVER_ROW_H, 14 + (pageW - 28), ry + DRIVER_ROW_H);
     ry += DRIVER_ROW_H;
   }
 
@@ -610,7 +560,7 @@ async function shareInvoicePDFWhatsApp(
   invoiceNum?: string,
   driversList?: DriverInfo[],
   driverImages?: Record<string, string>,
-  onDesktopFallback?: (fileName: string) => void
+  onDesktopFallback?: (fileName: string, waUrl: string) => void
 ) {
   const freshCarImages = await getCarImagesFromFirestore().catch(() => ({}));
   const mergedCarImages = { ...carImages, ...freshCarImages };
@@ -638,10 +588,9 @@ async function shareInvoicePDFWhatsApp(
     // Fall through to desktop fallback
   }
 
-  // Desktop fallback: download PDF + open WhatsApp Web with message
+  // Desktop fallback: download PDF + notify with modal
   doc.save(fileName);
-  onDesktopFallback?.(fileName);
-  setTimeout(() => window.open(waUrl, '_blank'), 800);
+  onDesktopFallback?.(fileName, waUrl);
 }
 
 // ── Deadline Badge ────────────────────────────────────────────────────────────
@@ -710,14 +659,11 @@ const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
         return;
       }
 
-      const isAdmin = await isAdminInFirestore(cred.user.uid);
-      if (!isAdmin) {
-        await signOut(auth);
-        setError('Access denied. This account does not have admin privileges.');
-        setLoading(false);
-        return;
-      }
-      onLogin();
+      // Not in whitelist — deny access regardless of Firestore role
+      await signOut(auth);
+      setError('Access denied. Only authorised admin accounts can access this panel.');
+      setLoading(false);
+      return;
     } catch {
       setError('Invalid email or password.');
     }
@@ -884,6 +830,13 @@ const AdminPanel = () => {
   const [newCarName, setNewCarName] = useState('');
   const [addingCar, setAddingCar] = useState(false);
 
+  // WhatsApp desktop-share modal state
+  const [whatsappShareModal, setWhatsappShareModal] = useState<{ fileName: string; waUrl: string } | null>(null);
+
+  // Settings accordion state
+  const [openSettingCard, setOpenSettingCard] = useState<string | null>(null);
+  const toggleSettingCard = (id: string) => setOpenSettingCard(prev => prev === id ? null : id);
+
   // Account security state
   const [securityCurrentPw, setSecurityCurrentPw] = useState('');
   const [securityNewPw, setSecurityNewPw] = useState('');
@@ -951,7 +904,7 @@ const AdminPanel = () => {
       if (user) {
         const emailLower = (user.email || '').toLowerCase();
         const isWhitelisted = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(emailLower);
-        const isAdmin = isWhitelisted || await isAdminInFirestore(user.uid);
+        const isAdmin = isWhitelisted; // strictly whitelist only
         if (isAdmin) {
           setAdminUser(user);
         } else {
@@ -972,11 +925,9 @@ const AdminPanel = () => {
     if (!user) { setAuthChecked(true); return; }
     const emailLower = (user.email || '').toLowerCase();
     const isWhitelisted = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(emailLower);
-    if (isWhitelisted) { setAdminUser(user); setAuthChecked(true); return; }
-    isAdminInFirestore(user.uid).then(isAdmin => {
-      if (isAdmin) setAdminUser(user);
-      setAuthChecked(true);
-    });
+    if (isWhitelisted) { setAdminUser(user); }
+    else { setAdminUser(null); }
+    setAuthChecked(true);
   }, [forceRecheckKey]);
 
   // Admin PWA manifest
@@ -1956,7 +1907,7 @@ const AdminPanel = () => {
                         {/* Actions */}
                         <div className="flex gap-1.5 pt-1 border-t border-border/50">
                           <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="flex-1 bg-primary/20 hover:bg-primary/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Download Invoice"><FileText className="w-4 h-4" /></button>
-                          <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages, (fn) => toast({ title: 'PDF Downloaded', description: `"${fn}" saved to Downloads. Please attach it manually in the WhatsApp chat that just opened.`, duration: 7000 }))} className="flex-1 bg-green-600/20 hover:bg-green-600/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Share via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                          <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages, (fn, url) => setWhatsappShareModal({ fileName: fn, waUrl: url }))} className="flex-1 bg-green-600/20 hover:bg-green-600/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Share PDF via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
                           <button onClick={() => sendWhatsApp(b)} className="flex-1 bg-green-600/10 hover:bg-green-600/20 p-2 rounded-lg flex items-center justify-center transition-all" title="WhatsApp Message"><MessageCircle className="w-4 h-4 text-green-300" /></button>
                           <button onClick={() => deleteBooking(b.id)} className="flex-1 bg-destructive/20 hover:bg-destructive/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Delete"><Trash2 className="w-4 h-4 text-destructive" /></button>
                         </div>
@@ -2055,7 +2006,7 @@ const AdminPanel = () => {
                                 )}
                                 <div className="flex gap-1.5">
                                   <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
-                                  <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages, (fn) => toast({ title: 'PDF Downloaded', description: `"${fn}" saved to Downloads. Please attach it manually in the WhatsApp chat that just opened.`, duration: 7000 }))} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                                  <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages, (fn, url) => setWhatsappShareModal({ fileName: fn, waUrl: url }))} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
                                   <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
                                   <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
                                 </div>
@@ -2998,6 +2949,46 @@ const AdminPanel = () => {
         onConfirm={executeDelete}
         itemName={deleteTarget?.name === '__ALL_LOCATIONS__' ? 'ALL locations and drop-offs' : (deleteTarget?.name || '')}
       />
+
+      {/* WhatsApp Desktop Share Modal */}
+      {whatsappShareModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setWhatsappShareModal(null)}>
+          <div className="bg-card border-2 border-green-500/40 rounded-2xl p-6 max-w-sm w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-green-500/10 border border-green-500/30 p-3 rounded-xl">
+                <Share2 className="w-6 h-6 text-green-400" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-foreground">PDF Ready</h3>
+                <p className="text-xs text-green-400">WhatsApp Sharing Guide</p>
+              </div>
+            </div>
+
+            <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-4 mb-4">
+              <p className="text-sm text-foreground font-medium mb-3">Your PDF has been downloaded:</p>
+              <p className="text-xs font-mono bg-card border border-border rounded-lg px-3 py-2 text-primary break-all mb-4">{whatsappShareModal.fileName}</p>
+              <ol className="text-sm text-muted-foreground space-y-2 list-none">
+                <li className="flex gap-2"><span className="text-green-400 font-bold flex-shrink-0">1.</span> Click "Open WhatsApp" below</li>
+                <li className="flex gap-2"><span className="text-green-400 font-bold flex-shrink-0">2.</span> In WhatsApp, click the attachment icon (📎)</li>
+                <li className="flex gap-2"><span className="text-green-400 font-bold flex-shrink-0">3.</span> Select "Document" and choose the PDF from your Downloads folder</li>
+              </ol>
+              <p className="text-[10px] text-muted-foreground mt-3 italic">Note: Direct PDF sharing is only available on mobile devices.</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { window.open(whatsappShareModal.waUrl, '_blank'); }}
+                className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2.5 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2">
+                <MessageCircle className="w-4 h-4" /> Open WhatsApp
+              </button>
+              <button onClick={() => setWhatsappShareModal(null)}
+                className="bg-muted hover:bg-muted/80 text-foreground px-4 py-2.5 rounded-xl font-semibold text-sm transition-colors">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
