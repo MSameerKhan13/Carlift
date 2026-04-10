@@ -19,7 +19,7 @@ export const db = getFirestore(app);
 export const storage = getStorage(app);
 
 export const ADMIN_EMAILS: string[] = [
-  'm.sameerkhanmughal@gmail.com',
+  '777carcare@gmail.com',
 ];
 
 setPersistence(auth, browserSessionPersistence).catch(() => {});

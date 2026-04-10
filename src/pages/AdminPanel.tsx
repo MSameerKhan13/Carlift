@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "@/hooks/use-toast";
 import {
   Crown, MapPin, CalendarCheck, Trash2, MessageCircle, FileText, Plus, ArrowLeft, X, Car, CheckCircle, Clock,
   Bell, AlertTriangle, Shield, ChevronDown, ChevronUp, Users, TrendingUp, Timer, Settings,
@@ -9,7 +10,9 @@ import {
 import { jsPDF } from "jspdf";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  onAuthStateChanged, signOut, updateProfile, type User as FBUser
+  onAuthStateChanged, signOut, updateProfile, type User as FBUser,
+  reauthenticateWithCredential, EmailAuthProvider,
+  updatePassword, verifyBeforeUpdateEmail
 } from "firebase/auth";
 import { auth, ADMIN_EMAILS } from "@/lib/firebase";
 import carLiftLogo from "@/assets/carlift-logo-new.png";
@@ -311,21 +314,22 @@ async function buildInvoicePDF(
   const isApproved = b.status === 'approved';
   const badgeX = 14 + billBoxW + 6;
   const badgeW = pageW - 14 - badgeX;
-  doc.setFillColor(isApproved ? 0 : 160, isApproved ? 120 : 60, 0);
+  doc.setFillColor(isApproved ? 0 : 100, isApproved ? 100 : 40, 0);
   doc.roundedRect(badgeX, billY, badgeW, 38, 3, 3, 'F');
-  doc.setDrawColor(isApproved ? 0 : 200, isApproved ? 160 : 80, 0);
+  doc.setDrawColor(isApproved ? 40 : 200, isApproved ? 160 : 80, isApproved ? 40 : 0);
   doc.setLineWidth(0.3);
   doc.roundedRect(badgeX, billY, badgeW, 38, 3, 3, 'S');
-  doc.setTextColor(255, 255, 255);
+  doc.setTextColor(200, 200, 200);
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.text("STATUS", badgeX + badgeW / 2, billY + 12, { align: "center" });
-  doc.setFontSize(12);
+  doc.setFontSize(13);
+  doc.setTextColor(255, 255, 255);
   doc.text(isApproved ? 'APPROVED' : 'PENDING', badgeX + badgeW / 2, billY + 24, { align: "center" });
-  doc.setFontSize(7);
+  doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(isApproved ? 180 : 220, isApproved ? 255 : 180, isApproved ? 180 : 100);
-  doc.text(isApproved ? '✓ Confirmed' : '⏳ Awaiting', badgeX + badgeW / 2, billY + 33, { align: "center" });
+  doc.setTextColor(isApproved ? 150 : 220, isApproved ? 230 : 180, isApproved ? 150 : 100);
+  doc.text(isApproved ? '[ Confirmed ]' : '[ Awaiting Approval ]', badgeX + badgeW / 2, billY + 33, { align: "center" });
 
   // ── Table ─────────────────────────────────────────────────────────────────
   const ROW_H = 13;
@@ -377,44 +381,50 @@ async function buildInvoicePDF(
 
   // ── Car image row ─────────────────────────────────────────────────────────
   if (b.assignedCar) {
-    const CAR_IMG_H = carImgBase64 ? 34 : 16;
-    // Alternate row background
+    const CAR_IMG_H = carImgBase64 ? 46 : 16;
     const imgRowBg = rows.length % 2 === 0 ? 22 : 14;
     doc.setFillColor(imgRowBg, imgRowBg, imgRowBg);
     doc.rect(14, ry, pageW - 28, CAR_IMG_H, 'F');
     doc.setFillColor(200, 0, 0);
     doc.rect(14, ry, 2.5, CAR_IMG_H, 'F');
 
-    doc.setTextColor(190, 190, 190);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text("Assigned Car Photo", 21, ry + (carImgBase64 ? 10 : CAR_IMG_H * 0.65));
+    // Label
+    doc.setTextColor(155, 155, 155);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("ASSIGNED CAR PHOTO", 21, ry + 9);
 
     if (carImgBase64) {
       try {
         const fmt = carImgBase64.startsWith('data:image/png') ? 'PNG' : 'JPEG';
-        doc.addImage(carImgBase64, fmt, pageW - 20 - 56, ry + 2, 56, CAR_IMG_H - 4);
+        const imgW = 70; const imgH = CAR_IMG_H - 6;
+        doc.setDrawColor(200, 0, 0);
+        doc.setLineWidth(0.4);
+        doc.roundedRect(pageW - 14 - imgW - 6, ry + 3, imgW, imgH, 2, 2, 'S');
+        doc.addImage(carImgBase64, fmt, pageW - 14 - imgW - 6, ry + 3, imgW, imgH);
       } catch {
-        if (rawCarImg && rawCarImg.startsWith('http')) {
+        if (rawCarImg?.startsWith('http')) {
           doc.setTextColor(100, 160, 255);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(9);
-          doc.textWithLink("View Car Image →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
+          doc.textWithLink("View Car Photo →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
         }
       }
-    } else if (rawCarImg && rawCarImg.startsWith('http')) {
-      // Image URL exists — show as prominent clickable link
+    } else if (rawCarImg?.startsWith('http')) {
       doc.setTextColor(100, 160, 255);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9.5);
       doc.textWithLink("View Car Photo →", pageW - 20, ry + CAR_IMG_H * 0.65, { url: rawCarImg, align: "right" });
     } else {
-      // Truly no image on file
       doc.setTextColor(120, 120, 120);
       doc.setFontSize(8.5);
       doc.setFont("helvetica", "italic");
       doc.text("Photo not uploaded", pageW - 20, ry + CAR_IMG_H * 0.65, { align: "right" });
     }
+    // Separator line after car row
+    doc.setDrawColor(40, 40, 40);
+    doc.setLineWidth(0.2);
+    doc.line(14, ry + CAR_IMG_H, 14 + (pageW - 28), ry + CAR_IMG_H);
     ry += CAR_IMG_H;
   }
 
@@ -442,7 +452,7 @@ async function buildInvoicePDF(
       doc.setTextColor(160, 160, 160);
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text(`📞 ${assignedDriver.phone}`, 21, ry + 31);
+      doc.text(`Ph: ${assignedDriver.phone}`, 21, ry + 31);
     }
 
     // Right photo column
@@ -505,7 +515,7 @@ async function buildInvoicePDF(
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
   doc.text("TOTAL MONTHLY FARE", 22, ry + 10);
-  const statusLabel = b.status === 'approved' ? '✓ CONFIRMED' : '⏳ PENDING APPROVAL';
+  const statusLabel = b.status === 'approved' ? '[ CONFIRMED ]' : '[ PENDING APPROVAL ]';
   doc.setTextColor(255, 240, 210);
   doc.setFontSize(7.5);
   doc.text(statusLabel, pageW - 20, ry + 10, { align: "right" });
@@ -599,7 +609,8 @@ async function shareInvoicePDFWhatsApp(
   companyInfo: CompanyInfo,
   invoiceNum?: string,
   driversList?: DriverInfo[],
-  driverImages?: Record<string, string>
+  driverImages?: Record<string, string>,
+  onDesktopFallback?: (fileName: string) => void
 ) {
   const freshCarImages = await getCarImagesFromFirestore().catch(() => ({}));
   const mergedCarImages = { ...carImages, ...freshCarImages };
@@ -615,7 +626,7 @@ async function shareInvoicePDFWhatsApp(
   );
   const waUrl = `https://wa.me/${waNum}?text=${waMsg}`;
 
-  // Try native Web Share API (works on Android/iOS)
+  // Try native Web Share API (works on Android/iOS PWA)
   try {
     const blob = doc.output('blob');
     const file = new File([blob], fileName, { type: 'application/pdf' });
@@ -627,9 +638,10 @@ async function shareInvoicePDFWhatsApp(
     // Fall through to desktop fallback
   }
 
-  // Desktop fallback: download PDF then open WhatsApp Web
+  // Desktop fallback: download PDF + open WhatsApp Web with message
   doc.save(fileName);
-  setTimeout(() => window.open(waUrl, '_blank'), 600);
+  onDesktopFallback?.(fileName);
+  setTimeout(() => window.open(waUrl, '_blank'), 800);
 }
 
 // ── Deadline Badge ────────────────────────────────────────────────────────────
@@ -871,6 +883,16 @@ const AdminPanel = () => {
   const [carsList, setCarsList] = useState<string[]>(CARS_LIST);
   const [newCarName, setNewCarName] = useState('');
   const [addingCar, setAddingCar] = useState(false);
+
+  // Account security state
+  const [securityCurrentPw, setSecurityCurrentPw] = useState('');
+  const [securityNewPw, setSecurityNewPw] = useState('');
+  const [securityConfirmPw, setSecurityConfirmPw] = useState('');
+  const [securityNewEmail, setSecurityNewEmail] = useState('');
+  const [securityShowPw, setSecurityShowPw] = useState(false);
+  const [securityMsg, setSecurityMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [savingPw, setSavingPw] = useState(false);
+  const [savingEmail, setSavingEmail] = useState(false);
 
   // Drivers state
   const [driversList, setDriversList] = useState<DriverInfo[]>([]);
@@ -1338,6 +1360,69 @@ const AdminPanel = () => {
     await updateBookingInFirestore(id, { status });
   };
 
+  // ── Account Security ──────────────────────────────────────────────────────
+  const reauthCurrentUser = async (currentPassword: string) => {
+    const user = auth.currentUser;
+    if (!user || !user.email) throw new Error('Not logged in');
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+  };
+
+  const handleChangePassword = async () => {
+    setSecurityMsg(null);
+    if (!securityCurrentPw) { setSecurityMsg({ type: 'err', text: 'Enter your current password.' }); return; }
+    if (securityNewPw.length < 8) { setSecurityMsg({ type: 'err', text: 'New password must be at least 8 characters.' }); return; }
+    if (!/[A-Z]/.test(securityNewPw)) { setSecurityMsg({ type: 'err', text: 'Password must contain at least one uppercase letter.' }); return; }
+    if (!/[0-9!@#$%^&*]/.test(securityNewPw)) { setSecurityMsg({ type: 'err', text: 'Password must contain at least one number or special character.' }); return; }
+    if (securityNewPw !== securityConfirmPw) { setSecurityMsg({ type: 'err', text: 'Passwords do not match.' }); return; }
+    setSavingPw(true);
+    try {
+      await reauthCurrentUser(securityCurrentPw);
+      await updatePassword(auth.currentUser!, securityNewPw);
+      setSecurityMsg({ type: 'ok', text: 'Password updated successfully.' });
+      setSecurityCurrentPw(''); setSecurityNewPw(''); setSecurityConfirmPw('');
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setSecurityMsg({ type: 'err', text: 'Current password is incorrect.' });
+      } else {
+        setSecurityMsg({ type: 'err', text: 'Failed to update password. Please try again.' });
+      }
+    }
+    setSavingPw(false);
+  };
+
+  const handleChangeEmail = async () => {
+    setSecurityMsg(null);
+    const newEmail = securityNewEmail.trim().toLowerCase();
+    if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+      setSecurityMsg({ type: 'err', text: 'Enter a valid email address.' }); return;
+    }
+    if (!securityCurrentPw) { setSecurityMsg({ type: 'err', text: 'Enter your current password to confirm.' }); return; }
+    setSavingEmail(true);
+    try {
+      await reauthCurrentUser(securityCurrentPw);
+      await verifyBeforeUpdateEmail(auth.currentUser!, newEmail);
+      // Also update the ADMIN_EMAILS whitelist via Firestore for persistence
+      await saveUserToFirestore(auth.currentUser!.uid, {
+        name: auth.currentUser!.displayName || newEmail.split('@')[0],
+        email: newEmail, phone: '', role: 'admin',
+      });
+      setSecurityMsg({ type: 'ok', text: `Verification email sent to ${newEmail}. Check your inbox and click the link to confirm the new address.` });
+      setSecurityNewEmail(''); setSecurityCurrentPw('');
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setSecurityMsg({ type: 'err', text: 'Current password is incorrect.' });
+      } else if (code === 'auth/email-already-in-use') {
+        setSecurityMsg({ type: 'err', text: 'This email is already in use by another account.' });
+      } else {
+        setSecurityMsg({ type: 'err', text: 'Failed to update email. Please try again.' });
+      }
+    }
+    setSavingEmail(false);
+  };
+
   // ── Car Assignment ────────────────────────────────────────────────────────
   const assignCar = async (id: number, car: string) => {
     const updated = bookings.map(b => b.id === id ? { ...b, assignedCar: car } : b);
@@ -1728,8 +1813,14 @@ const AdminPanel = () => {
                 </div>
               )}
             </div>
-            <button onClick={() => navigate('/')} className="bg-primary/20 border border-primary text-foreground px-2.5 md:px-4 py-1.5 md:py-2 rounded-lg font-semibold text-xs md:text-sm hover:bg-primary/30 hover:scale-105 transition-all flex items-center gap-1.5">
-              <ArrowLeft className="w-3.5 h-3.5 md:w-4 md:h-4" /> <span className="hidden sm:inline">Back</span>
+            <button
+              onClick={() => {
+                if (activeTab !== 'bookings') { setActiveTab('bookings'); }
+                else { navigate('/'); }
+              }}
+              className="bg-primary/20 border border-primary text-foreground px-2.5 md:px-4 py-1.5 md:py-2 rounded-lg font-semibold text-xs md:text-sm hover:bg-primary/30 hover:scale-105 transition-all flex items-center gap-1.5">
+              <ArrowLeft className="w-3.5 h-3.5 md:w-4 md:h-4" />
+              <span className="hidden sm:inline">{activeTab !== 'bookings' ? 'Dashboard' : 'Home'}</span>
             </button>
             <button onClick={handleAdminLogout} className="bg-destructive/20 border border-destructive/50 text-destructive px-2.5 md:px-4 py-1.5 md:py-2 rounded-lg font-semibold text-xs md:text-sm hover:bg-destructive/30 hover:scale-105 transition-all flex items-center gap-1.5">
               <LogIn className="w-3.5 h-3.5 md:w-4 md:h-4 rotate-180" /> <span className="hidden sm:inline">Logout</span>
@@ -1865,7 +1956,7 @@ const AdminPanel = () => {
                         {/* Actions */}
                         <div className="flex gap-1.5 pt-1 border-t border-border/50">
                           <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="flex-1 bg-primary/20 hover:bg-primary/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Download Invoice"><FileText className="w-4 h-4" /></button>
-                          <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="flex-1 bg-green-600/20 hover:bg-green-600/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Share via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                          <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages, (fn) => toast({ title: 'PDF Downloaded', description: `"${fn}" saved to Downloads. Please attach it manually in the WhatsApp chat that just opened.`, duration: 7000 }))} className="flex-1 bg-green-600/20 hover:bg-green-600/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Share via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
                           <button onClick={() => sendWhatsApp(b)} className="flex-1 bg-green-600/10 hover:bg-green-600/20 p-2 rounded-lg flex items-center justify-center transition-all" title="WhatsApp Message"><MessageCircle className="w-4 h-4 text-green-300" /></button>
                           <button onClick={() => deleteBooking(b.id)} className="flex-1 bg-destructive/20 hover:bg-destructive/30 p-2 rounded-lg flex items-center justify-center transition-all" title="Delete"><Trash2 className="w-4 h-4 text-destructive" /></button>
                         </div>
@@ -1964,7 +2055,7 @@ const AdminPanel = () => {
                                 )}
                                 <div className="flex gap-1.5">
                                   <button onClick={() => generateInvoicePDF(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="bg-primary/20 hover:bg-primary/30 hover:scale-110 p-2 rounded-md transition-all" title="Download Invoice PDF"><FileText className="w-4 h-4" /></button>
-                                  <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages)} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
+                                  <button onClick={() => shareInvoicePDFWhatsApp(b, carImages, companyInfo, customInvoiceNums[b.id], driversList, driverImages, (fn) => toast({ title: 'PDF Downloaded', description: `"${fn}" saved to Downloads. Please attach it manually in the WhatsApp chat that just opened.`, duration: 7000 }))} className="bg-green-600/20 hover:bg-green-600/30 hover:scale-110 p-2 rounded-md transition-all" title="Share Invoice via WhatsApp"><Share2 className="w-4 h-4 text-green-400" /></button>
                                   <button onClick={() => sendWhatsApp(b)} className="bg-green-600/10 hover:bg-green-600/20 hover:scale-110 p-2 rounded-md transition-all" title="Send WhatsApp Text"><MessageCircle className="w-4 h-4 text-green-300" /></button>
                                   <button onClick={() => deleteBooking(b.id)} className="bg-destructive/20 hover:bg-destructive/30 hover:scale-110 p-2 rounded-md transition-all opacity-0 group-hover:opacity-100" title="Delete Booking"><Trash2 className="w-4 h-4 text-destructive" /></button>
                                 </div>
@@ -2113,6 +2204,100 @@ const AdminPanel = () => {
         {/* ── SETTINGS TAB ── */}
         {activeTab === 'settings' && (
           <div className="flex flex-col gap-6">
+
+            {/* ── Account Security ── */}
+            <div className="bg-card border border-border rounded-2xl p-5">
+              <h3 className="text-primary font-display font-bold text-lg mb-2 pb-3 border-b border-border flex items-center gap-2">
+                <Shield className="w-5 h-5" /> Account Security
+              </h3>
+              <p className="text-xs text-muted-foreground mb-5">Change your admin login credentials. Current password is always required to confirm any change.</p>
+
+              {securityMsg && (
+                <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-2 ${securityMsg.type === 'ok' ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-destructive/10 border border-destructive/30 text-destructive'}`}>
+                  {securityMsg.type === 'ok' ? <CheckCircle className="w-4 h-4 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 flex-shrink-0" />}
+                  {securityMsg.text}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Change Password */}
+                <div className="bg-primary/5 border border-border rounded-xl p-4 flex flex-col gap-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <EyeOff className="w-4 h-4 text-primary" />
+                    <span className="font-semibold text-sm text-foreground">Change Password</span>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">Current Password</label>
+                    <div className="relative">
+                      <input type={securityShowPw ? 'text' : 'password'} value={securityCurrentPw}
+                        onChange={e => setSecurityCurrentPw(e.target.value)}
+                        placeholder="Enter current password"
+                        className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none pr-10" />
+                      <button type="button" onClick={() => setSecurityShowPw(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                        {securityShowPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">New Password</label>
+                    <input type="password" value={securityNewPw}
+                      onChange={e => setSecurityNewPw(e.target.value)}
+                      placeholder="Min 8 chars, 1 uppercase, 1 number/symbol"
+                      className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">Confirm New Password</label>
+                    <input type="password" value={securityConfirmPw}
+                      onChange={e => setSecurityConfirmPw(e.target.value)}
+                      placeholder="Re-enter new password"
+                      className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none" />
+                  </div>
+                  <ul className="text-[10px] text-muted-foreground space-y-0.5 pl-1">
+                    <li className={securityNewPw.length >= 8 ? 'text-green-400' : ''}>• At least 8 characters</li>
+                    <li className={/[A-Z]/.test(securityNewPw) ? 'text-green-400' : ''}>• At least 1 uppercase letter</li>
+                    <li className={/[0-9!@#$%^&*]/.test(securityNewPw) ? 'text-green-400' : ''}>• At least 1 number or special character</li>
+                    <li className={securityNewPw === securityConfirmPw && securityNewPw.length > 0 ? 'text-green-400' : ''}>• Passwords match</li>
+                  </ul>
+                  <button onClick={handleChangePassword} disabled={savingPw}
+                    className="mt-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50">
+                    {savingPw ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                    {savingPw ? 'Updating...' : 'Update Password'}
+                  </button>
+                </div>
+
+                {/* Change Email */}
+                <div className="bg-primary/5 border border-border rounded-xl p-4 flex flex-col gap-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Mail className="w-4 h-4 text-primary" />
+                    <span className="font-semibold text-sm text-foreground">Change Login Email</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground bg-orange-500/10 border border-orange-500/20 rounded-lg px-3 py-2.5">
+                    Current: <span className="text-foreground font-medium">{adminUser?.email || '—'}</span>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">New Email Address</label>
+                    <input type="email" value={securityNewEmail}
+                      onChange={e => setSecurityNewEmail(e.target.value)}
+                      placeholder="new@example.com"
+                      className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">Current Password (to confirm)</label>
+                    <input type="password" value={securityCurrentPw}
+                      onChange={e => setSecurityCurrentPw(e.target.value)}
+                      placeholder="Enter current password"
+                      className="w-full px-3 py-2.5 bg-input border border-primary/40 rounded-xl text-sm text-foreground focus:border-primary focus:outline-none" />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">A verification link will be sent to the new email. Your login address changes only after you click that link.</p>
+                  <button onClick={handleChangeEmail} disabled={savingEmail}
+                    className="mt-1 bg-primary text-primary-foreground px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-primary/85 transition-all flex items-center gap-2 disabled:opacity-50">
+                    {savingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                    {savingEmail ? 'Sending...' : 'Send Verification Link'}
+                  </button>
+                </div>
+              </div>
+            </div>
 
             {/* ── Company Info ── */}
             <div className="bg-card border border-border rounded-2xl p-5">
